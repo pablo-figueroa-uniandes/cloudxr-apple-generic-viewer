@@ -35,7 +35,10 @@ struct LaunchView: View {
 
     func showImmersiveSpace() {
         Task {
-            await openImmersiveSpace(id: immersiveTitle)
+            // The foveated session presents its own immersive space when streaming starts.
+            if appModel.backend == .classic {
+                await openImmersiveSpace(id: immersiveTitle)
+            }
             if !ViewerApp.persistLaunchWindow {
                 dismissWindow(id: launchTitle)
             }

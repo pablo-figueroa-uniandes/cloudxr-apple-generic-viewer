@@ -18,12 +18,12 @@
 //
 // Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
 
-import CloudXRKit
 import SwiftUI
 import os.log
 
 #if os(visionOS)
 // Manages the state and lifecycle of windows and immersive spaces in the application
+@MainActor
 class WindowStateManager {
     // Logger instance for debugging and error tracking
     private static let logger = Logger()
@@ -47,13 +47,8 @@ class WindowStateManager {
     private var dismissWindow: DismissWindowAction!
 
     // When the immersive space is dismissed, we want to disconnect, but in the case of the IPD check, we do not.
-    private var _pauseOnImmersiveSpaceDismissed = true
-    private var lock = OSAllocatedUnfairLock()
-
-    var pauseOnImmersiveSpaceDismissed: Bool {
-        get { lock.withLock { _pauseOnImmersiveSpaceDismissed } }
-        set { lock.withLock { _pauseOnImmersiveSpaceDismissed = newValue } }
-    }
+    // The manager is main-actor isolated, so this needs no lock.
+    var pauseOnImmersiveSpaceDismissed = true
 
     // Initializes the manager with necessary actions and session reference.
     // Should be called at least once before any other functions.
@@ -123,10 +118,11 @@ class WindowStateManager {
                 dismissWindow(id: windowId)
             }
         } else if scenePhase == .active {
-            if appModel.session?.state == .paused {
+            if appModel.status == .paused {
                 Task { @MainActor in
-                    try appModel.session?.resume()
-                    if !immersiveSpaceActive {
+                    try await appModel.activeSession?.resume()
+                    // The foveated session presents its own immersive space on resume.
+                    if appModel.backend == .classic && !immersiveSpaceActive {
                         await openImmersiveSpace(id: immersiveTitle)
                     }
                 }
@@ -142,7 +138,7 @@ class WindowStateManager {
         }
     }
 
-    func onConnectionStateChanged(oldState: SessionState, newState: SessionState) async {
+    func onConnectionStateChanged(oldState: ViewerStatus, newState: ViewerStatus) async {
         switch newState {
         case .connected:
             await handleConnectionEstablished()
@@ -167,12 +163,13 @@ class WindowStateManager {
 
     // Handles connection established event.
     // Behavior: Opens immersive space and optionally hides window based on settings.
+    // The foveated session opens its immersive space itself (`immersivePresentationBehaviors`).
     private func handleConnectionEstablished() async {
         guard configured else {
             fatalError("Connection established before window manager was configured")
         }
 
-        if !immersiveSpaceActive {
+        if appModel.backend == .classic && !immersiveSpaceActive {
             await openImmersiveSpace(id: immersiveTitle)
         }
 
@@ -181,13 +178,14 @@ class WindowStateManager {
 
     // Handles disconnection event
     // Behavior: Restores window visibility and dismisses immersive space
+    // (the foveated session dismisses its own).
     private func handleDisconnection() async {
         guard configured else {
             fatalError("Disconnection before window manager was configured")
         }
 
         switchWindow(newWindowId: launchTitle)
-        if immersiveSpaceActive == true {
+        if appModel.backend == .classic && immersiveSpaceActive == true {
             await dismissImmersiveSpace()
         }
     }
@@ -217,14 +215,14 @@ class WindowStateManager {
         switchWindow(newWindowId: launchTitle)
 
         // Pause the session if necessary
-        switch appModel.session?.state {
+        switch appModel.status {
         case .disconnecting, .disconnected, .initialized, .pausing, .paused:
             return
         default:
             if pauseOnImmersiveSpaceDismissed {
-                appModel.session?.pause()
                 // If headset is removed, dismiss immersive space rather than leaving it in background.
                 Task { @MainActor in
+                    try? await appModel.activeSession?.pause()
                     if immersiveSpaceActive {
                         await dismissImmersiveSpace()
                     }

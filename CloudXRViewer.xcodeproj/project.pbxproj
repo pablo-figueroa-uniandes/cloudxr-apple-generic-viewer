@@ -19,6 +19,7 @@
 		01C927EC2CB9BF64006D4D8D /* CloudXRKit in Frameworks */ = {isa = PBXBuildFile; productRef = 01C927EB2CB9BF64006D4D8D /* CloudXRKit */; };
 		3C4885C12D36F05500108A07 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4885BF2D36F05300108A07 /* Utilities.swift */; };
 		3C4885C32D370D8100108A07 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4885BF2D36F05300108A07 /* Utilities.swift */; };
+		503B457F948F17FCB6DFF56B /* ViewerSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AA48E98644EE1F2A919EDF /* ViewerSession.swift */; };
 		55629C972E99B4FE00B85E5B /* StreamingView+extensions+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55629C952E99B4FE00B85E5B /* StreamingView+extensions+iOS.swift */; };
 		55629C982E99B4FE00B85E5B /* StreamingView+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55629C962E99B4FE00B85E5B /* StreamingView+iOS.swift */; };
 		55629C9B2E99B4FE00B85E5B /* ImmersiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55629C992E99B4FE00B85E5B /* ImmersiveView.swift */; };
@@ -33,6 +34,7 @@
 		8650F4D72E6949F9009E755A /* MainContentView+visionOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8650F4D62E6949F9009E755A /* MainContentView+visionOS.swift */; };
 		868218DC2E2EF509005ED313 /* GuestMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 868218DB2E2EF4FF005ED313 /* GuestMode.swift */; };
 		868218DD2E2EF509005ED313 /* GuestMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 868218DB2E2EF4FF005ED313 /* GuestMode.swift */; };
+		9027447190A0F41014548AE3 /* ClassicSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342A40C1B3AE4043E4084E38 /* ClassicSession.swift */; };
 		9C981CE92D30968500C3A953 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01AFA43D2BF7D8C5004B6F6B /* Assets.xcassets */; };
 		9CAEE0C72D307CF90030E3F6 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01AFA43B2BF7D8C5004B6F6B /* AppDelegate.swift */; };
 		9CAEE0CC2D307CF90030E3F6 /* UIConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01AFA44D2BF7D8C5004B6F6B /* UIConstants.swift */; };
@@ -47,9 +49,15 @@
 		9CAEE0F82D3082160030E3F6 /* CloudXRViewer-visionOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9CAEE0F72D3082160030E3F6 /* CloudXRViewer-visionOS-Info.plist */; };
 		9CC51E182D308742003A1CF0 /* Color+hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CC51E172D308742003A1CF0 /* Color+hex.swift */; };
 		9CC51E192D308742003A1CF0 /* Color+hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CC51E172D308742003A1CF0 /* Color+hex.swift */; };
+		A58E4238A63087C35EDCE68C /* ClassicSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342A40C1B3AE4043E4084E38 /* ClassicSession.swift */; };
 		A725B0302C6EC005000248FE /* StarRatingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A725B02F2C6EC005000248FE /* StarRatingView.swift */; };
+		B1CD4B97B644D64B97842B37 /* ViewerSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AA48E98644EE1F2A919EDF /* ViewerSession.swift */; };
 		BD00C8412D31D6CE006A341D /* UIStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01AFA44E2BF7D8C5004B6F6B /* UIStyles.swift */; };
 		BD00C8452D31E34A006A341D /* UIStyles+visionOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD00C8442D31E33D006A341D /* UIStyles+visionOS.swift */; };
+		CF8244B99B782FAD42FDA5AE /* FoveatedSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC741298972CAB558C431DA /* FoveatedSession.swift */; };
+		E0F543E789590F7BF0B512FE /* FoveatedImmersiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13844E3BD3E1355D03673F3 /* FoveatedImmersiveView.swift */; };
+		F0E5A0042F0A000100C0FFEE /* StreamingSession in Frameworks */ = {isa = PBXBuildFile; productRef = F0E5A0032F0A000100C0FFEE /* StreamingSession */; };
+		F5964041A563A1E9107A7599 /* FoveatedSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC741298972CAB558C431DA /* FoveatedSession.swift */; };
 		FB9895E82E00F1970041368D /* WindowStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB9895E72E00F1970041368D /* WindowStateManager.swift */; };
 		FB9895E92E00F1970041368D /* WindowStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB9895E72E00F1970041368D /* WindowStateManager.swift */; };
 		FBAAC52A2D2FC3E500F2117D /* TestHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAAC5292D2FC3E500F2117D /* TestHelper.swift */; };
@@ -76,6 +84,7 @@
 		01AFA44D2BF7D8C5004B6F6B /* UIConstants.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UIConstants.swift; sourceTree = "<group>"; };
 		01AFA44E2BF7D8C5004B6F6B /* UIStyles.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UIStyles.swift; sourceTree = "<group>"; };
 		01AFA4712BF7D954004B6F6B /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		342A40C1B3AE4043E4084E38 /* ClassicSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicSession.swift; sourceTree = "<group>"; };
 		3C4885BF2D36F05300108A07 /* Utilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
 		55629C952E99B4FE00B85E5B /* StreamingView+extensions+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamingView+extensions+iOS.swift"; sourceTree = "<group>"; };
 		55629C962E99B4FE00B85E5B /* StreamingView+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamingView+iOS.swift"; sourceTree = "<group>"; };
@@ -87,6 +96,7 @@
 		55D382202E99B922009D89EB /* CloudXRViewer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudXRViewer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		55D382212E99B922009D89EB /* CloudXRViewer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudXRViewer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		55D382222E99B922009D89EB /* CloudXRViewerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CloudXRViewerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5AC741298972CAB558C431DA /* FoveatedSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoveatedSession.swift; sourceTree = "<group>"; };
 		8602F80D2E3845780038864F /* SessionConfigView+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionConfigView+iOS.swift"; sourceTree = "<group>"; };
 		8602F80F2E3845880038864F /* SessionConfigView+visionOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionConfigView+visionOS.swift"; sourceTree = "<group>"; };
 		8650F4D62E6949F9009E755A /* MainContentView+visionOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MainContentView+visionOS.swift"; sourceTree = "<group>"; };
@@ -97,7 +107,9 @@
 		9CC51E172D308742003A1CF0 /* Color+hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+hex.swift"; sourceTree = "<group>"; };
 		A725B02F2C6EC005000248FE /* StarRatingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StarRatingView.swift; sourceTree = "<group>"; };
 		BD00C8442D31E33D006A341D /* UIStyles+visionOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UIStyles+visionOS.swift"; sourceTree = "<group>"; };
+		D13844E3BD3E1355D03673F3 /* FoveatedImmersiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoveatedImmersiveView.swift; sourceTree = "<group>"; };
 		DAB674CA2E1D5B73003DB343 /* CloudXRViewer-visionOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "CloudXRViewer-visionOS.entitlements"; sourceTree = "<group>"; };
+		E9AA48E98644EE1F2A919EDF /* ViewerSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerSession.swift; sourceTree = "<group>"; };
 		FB9895E72E00F1970041368D /* WindowStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowStateManager.swift; sourceTree = "<group>"; };
 		FBAAC5292D2FC3E500F2117D /* TestHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelper.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -115,6 +127,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9CAEE0EB2D307CF90030E3F6 /* CloudXRKit in Frameworks */,
+				F0E5A0042F0A000100C0FFEE /* StreamingSession in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -150,6 +163,16 @@
 			path = "Preview Content";
 			sourceTree = "<group>";
 		};
+		73BA42C8941F7ADBB15398C0 /* Streaming */ = {
+			isa = PBXGroup;
+			children = (
+				E9AA48E98644EE1F2A919EDF /* ViewerSession.swift */,
+				342A40C1B3AE4043E4084E38 /* ClassicSession.swift */,
+				5AC741298972CAB558C431DA /* FoveatedSession.swift */,
+			);
+			path = Streaming;
+			sourceTree = "<group>";
+		};
 		9CAEE0B92D3079BF0030E3F6 /* iOS */ = {
 			isa = PBXGroup;
 			children = (
@@ -173,6 +196,7 @@
 				DAB674CA2E1D5B73003DB343 /* CloudXRViewer-visionOS.entitlements */,
 				55629C992E99B4FE00B85E5B /* ImmersiveView.swift */,
 				55629C9A2E99B4FE00B85E5B /* WindowUI.swift */,
+				D13844E3BD3E1355D03673F3 /* FoveatedImmersiveView.swift */,
 			);
 			path = visionOS;
 			sourceTree = "<group>";
@@ -194,6 +218,7 @@
 				FBAAC5292D2FC3E500F2117D /* TestHelper.swift */,
 				5573C2392DA39E4500C7003B /* AppModel.swift */,
 				FB9895E72E00F1970041368D /* WindowStateManager.swift */,
+				73BA42C8941F7ADBB15398C0 /* Streaming */,
 			);
 			path = Common;
 			sourceTree = "<group>";
@@ -245,6 +270,7 @@
 			name = "CloudXRViewer-iOS";
 			packageProductDependencies = (
 				9CAEE0BD2D307CF90030E3F6 /* CloudXRKit */,
+				F0E5A0032F0A000100C0FFEE /* StreamingSession */,
 			);
 			productName = CloudXRViewer;
 			productReference = 55D382212E99B922009D89EB /* CloudXRViewer.app */;
@@ -298,6 +324,10 @@
 				Base,
 			);
 			mainGroup = EAA206412B16737300B5867E;
+			packageReferences = (
+				F0E5A0012F0A000100C0FFEE /* XCRemoteSwiftPackageReference "cloudxr-framework" */,
+				F0E5A0022F0A000100C0FFEE /* XCRemoteSwiftPackageReference "streamingsession" */,
+			);
 			productRefGroup = EAA206412B16737300B5867E;
 			projectDirPath = "";
 			projectRoot = "";
@@ -369,6 +399,9 @@
 				9CAEE0D92D307CF90030E3F6 /* SessionConfigView+extensions.swift in Sources */,
 				5573C5372DA70EFC00C7003B /* ServerActionsView.swift in Sources */,
 				9CAEE0E62D307CF90030E3F6 /* SessionConfigView.swift in Sources */,
+				B1CD4B97B644D64B97842B37 /* ViewerSession.swift in Sources */,
+				A58E4238A63087C35EDCE68C /* ClassicSession.swift in Sources */,
+				CF8244B99B782FAD42FDA5AE /* FoveatedSession.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -396,6 +429,10 @@
 				BD00C8452D31E34A006A341D /* UIStyles+visionOS.swift in Sources */,
 				8602F8102E3845880038864F /* SessionConfigView+visionOS.swift in Sources */,
 				01AFA45D2BF7D8C5004B6F6B /* SessionConfigView.swift in Sources */,
+				503B457F948F17FCB6DFF56B /* ViewerSession.swift in Sources */,
+				9027447190A0F41014548AE3 /* ClassicSession.swift in Sources */,
+				F5964041A563A1E9107A7599 /* FoveatedSession.swift in Sources */,
+				E0F543E789590F7BF0B512FE /* FoveatedImmersiveView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -482,7 +519,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 7;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CloudXRViewer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CloudXRViewer";
-				XROS_DEPLOYMENT_TARGET = 2.4;
+				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Debug;
 		};
@@ -551,7 +588,7 @@
 				TARGETED_DEVICE_FAMILY = 7;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CloudXRViewer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CloudXRViewer";
 				VALIDATE_PRODUCT = YES;
-				XROS_DEPLOYMENT_TARGET = 2.4;
+				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Release;
 		};
@@ -628,7 +665,7 @@
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationLandscapeRight;
 				IOS_FILES = "*+iOS.*";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -722,7 +759,7 @@
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationLandscapeRight;
 				IOS_FILES = "*+iOS.*";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -784,7 +821,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SUPPORTED_PLATFORMS = "xrsimulator xros";
 				TARGETED_DEVICE_FAMILY = visionOS;
-				XROS_DEPLOYMENT_TARGET = 2.4;
+				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Debug;
 		};
@@ -822,7 +859,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				SUPPORTED_PLATFORMS = "xrsimulator xros";
 				TARGETED_DEVICE_FAMILY = visionOS;
-				XROS_DEPLOYMENT_TARGET = 2.4;
+				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Release;
 		};
@@ -919,7 +956,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 7;
 				VISIONOS_FILES = "*+visionOS.*";
-				XROS_DEPLOYMENT_TARGET = 2.4;
+				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Debug;
 		};
@@ -1009,7 +1046,7 @@
 				TARGETED_DEVICE_FAMILY = 7;
 				VALIDATE_PRODUCT = YES;
 				VISIONOS_FILES = "*+visionOS.*";
-				XROS_DEPLOYMENT_TARGET = 2.4;
+				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Release;
 		};
@@ -1054,14 +1091,40 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		F0E5A0012F0A000100C0FFEE /* XCRemoteSwiftPackageReference "cloudxr-framework" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/NVIDIA/cloudxr-framework";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.2;
+			};
+		};
+		F0E5A0022F0A000100C0FFEE /* XCRemoteSwiftPackageReference "streamingsession" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/streamingsession";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		01C927EB2CB9BF64006D4D8D /* CloudXRKit */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F0E5A0012F0A000100C0FFEE /* XCRemoteSwiftPackageReference "cloudxr-framework" */;
 			productName = CloudXRKit;
 		};
 		9CAEE0BD2D307CF90030E3F6 /* CloudXRKit */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F0E5A0012F0A000100C0FFEE /* XCRemoteSwiftPackageReference "cloudxr-framework" */;
 			productName = CloudXRKit;
+		};
+		F0E5A0032F0A000100C0FFEE /* StreamingSession */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F0E5A0022F0A000100C0FFEE /* XCRemoteSwiftPackageReference "streamingsession" */;
+			productName = StreamingSession;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

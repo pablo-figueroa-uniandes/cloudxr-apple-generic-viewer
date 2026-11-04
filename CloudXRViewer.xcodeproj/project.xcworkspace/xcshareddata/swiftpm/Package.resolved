@@ -1,0 +1,24 @@
+{
+  "originHash" : "1108ffeb894af5be8b53d30ae6a895541e1444b053f7b91e0f706653207ca4c5",
+  "pins" : [
+    {
+      "identity" : "cloudxr-framework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NVIDIA/cloudxr-framework",
+      "state" : {
+        "revision" : "5cd43e00e6e038d64b03896b00cad53821030b20",
+        "version" : "6.2.0"
+      }
+    },
+    {
+      "identity" : "streamingsession",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/streamingsession",
+      "state" : {
+        "branch" : "main",
+        "revision" : "b8a3b7502f5f3a46553f957ec0a841c6b27ab069"
+      }
+    }
+  ],
+  "version" : 3
+}

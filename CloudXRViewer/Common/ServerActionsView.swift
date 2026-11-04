@@ -19,7 +19,6 @@
 // Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
 
 import SwiftUI
-import CloudXRKit
 import os.log
 
 struct ServerActionsView: View {
@@ -30,8 +29,8 @@ struct ServerActionsView: View {
     @State var lastMessageSent: String = ""
     @State var lastMessageReceived: String = ""
 
-    @Binding var currentChannelSelection: ChannelInfo?
-    @Binding var currentChannel: MessageChannel?
+    @Binding var currentChannelSelection: ViewerChannelID?
+    @Binding var currentChannel: (any ViewerChannel)?
 
     // Reader task for the currently selected channel.
     @State private var channelReaderTask: Task<Void, Never>?
@@ -51,10 +50,11 @@ struct ServerActionsView: View {
         }
 
         if let channel = currentChannel {
-            if channel.sendServerMessage(messageData) {
+            do {
+                try channel.send(messageData)
                 lastMessageSent = message
-            } else {
-                Self.logger.warning("Failed to send message via current channel")
+            } catch {
+                Self.logger.warning("Failed to send message via current channel: \(error.localizedDescription)")
                 lastMessageSent = "Error - failed to send"
             }
         } else {
@@ -66,15 +66,15 @@ struct ServerActionsView: View {
     var body: some View {
         Form {
             VStack {
-                if let session = appModel.session {
+                if let session = appModel.activeSession {
                     Picker("Channels", selection: $currentChannelSelection) {
-                        ForEach(session.availableMessageChannels, id: \.self) { channelInfo in
-                            Text("Channel [\(channelInfo.uuid.map { String($0) }.joined(separator: ","))]").tag(channelInfo as ChannelInfo?)
+                        ForEach(session.channelIDs, id: \.self) { channelID in
+                            Text(channelID.label).tag(channelID as ViewerChannelID?)
                         }
-                        Text("None").tag(nil as ChannelInfo?)
+                        Text("None").tag(nil as ViewerChannelID?)
                     }
                     .pickerStyle(.menu)
-                    .id(session.availableMessageChannels)
+                    .id(session.channelIDs)
                     .onChange(of: currentChannelSelection) {
                         currentChannel = nil
                         // Cancel any existing reader task when switching selection.
@@ -83,7 +83,7 @@ struct ServerActionsView: View {
                         guard let channelSelection = currentChannelSelection else {
                             return
                         }
-                        guard let channel = session.getMessageChannel(channelSelection) else {
+                        guard let channel = session.channel(for: channelSelection) else {
                             return
                         }
 
@@ -96,9 +96,9 @@ struct ServerActionsView: View {
                             }
                         }
                     }
-                    .onChange(of: session.availableMessageChannels) {
+                    .onChange(of: session.channelIDs) {
                         if let channelSelection = currentChannelSelection,
-                           !session.availableMessageChannels.contains(channelSelection)
+                           !session.channelIDs.contains(channelSelection)
                         {
                             currentChannelSelection = nil
                             // Cancel reader if selection disappears.
@@ -108,7 +108,7 @@ struct ServerActionsView: View {
                     }
 
                     if let channel = currentChannel {
-                        Text("Status: \(channel.status.rawValue)")
+                        Text("Status: \(channel.statusDescription)")
                     } else {
                         Text("Status: N/A")
                     }
@@ -169,8 +169,8 @@ struct ServerActionsView: View {
 
 #Preview {
     @Previewable @State var appModel = AppModel()
-    @Previewable @State var selection: ChannelInfo? = nil
-    @Previewable @State var channel: MessageChannel? = nil
+    @Previewable @State var selection: ViewerChannelID? = nil
+    @Previewable @State var channel: (any ViewerChannel)? = nil
     ServerActionsView(currentChannelSelection: $selection, currentChannel: $channel)
         .environment(appModel)
 }

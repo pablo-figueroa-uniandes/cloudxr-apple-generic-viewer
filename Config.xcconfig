@@ -7,5 +7,10 @@
 // https://developer.apple.com/documentation/xcode/adding-a-build-configuration-file-to-your-project
 
 // Build configuration
-MARKETING_VERSION = 6.0.0
+MARKETING_VERSION = 6.1.0
 PRODUCT_BUNDLE_IDENTIFIER = com.nvidia.cloudxr-viewer
+
+// Apple's FoveatedStreaming framework (visionOS) and StreamingSession package (iOS) ship for
+// devices only, so the foveated backend is compiled into device builds only.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=xros*] = $(inherited) FOVEATED_STREAMING
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos*] = $(inherited) FOVEATED_STREAMING

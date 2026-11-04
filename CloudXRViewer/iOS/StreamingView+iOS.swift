@@ -21,6 +21,7 @@
 import SwiftUI
 import RealityKit
 import CloudXRKit
+import StreamingSession
 import ARKit
 import Foundation
 
@@ -42,24 +43,19 @@ struct BasicStreamingView : View {
 
     @Binding var application: Application
 
-    @State var currentChannelSelection: ChannelInfo?
-    @State var currentChannel: MessageChannel?
+    @State var currentChannelSelection: ViewerChannelID?
+    @State var currentChannel: (any ViewerChannel)?
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            RealityView { content in
-                sessionEntity.name = "Session"
-                // The camera that displays virtual RealityKit content and camera passthrough, with tracking capabilities.
-                content.camera = .spatialTracking
-                if let session = appModel.session {
-                    sessionEntity.components[CloudXRSessionComponent.self] = .init(session: session)
-                }
-
-                content.add(sessionEntity)
+            if appModel.backend == .foveated {
+                FoveatedStreamingView(session: appModel.foveatedSession)
+                    .edgesIgnoringSafeArea(.all)
+            } else {
+                classicStreamView
             }
-            .edgesIgnoringSafeArea(.all)
 
-            if showHUD {
+            if showHUD && appModel.backend == .classic {
                 hudView
             }
 
@@ -77,7 +73,7 @@ struct BasicStreamingView : View {
             }
 
             // Show the overylay UI only when connected.
-            if appModel.session?.state == .connected {
+            if appModel.status == .connected {
                 VStack {
                     Spacer()
                     // Button to enable/disable HUD.
@@ -85,8 +81,10 @@ struct BasicStreamingView : View {
                         actionsButton
                         Spacer()
                         configButton
-                        Spacer()
-                        hudButton
+                        if appModel.backend == .classic {
+                            Spacer()
+                            hudButton
+                        }
                     }
                 }
                 .padding([.leading, .trailing, .bottom], 16)
@@ -97,6 +95,21 @@ struct BasicStreamingView : View {
                 SessionConfigView(application: $application) {}
             }
         }
+    }
+
+    /// CloudXRKit renders through a RealityKit entity carrying the session component.
+    private var classicStreamView: some View {
+        RealityView { content in
+            sessionEntity.name = "Session"
+            // The camera that displays virtual RealityKit content and camera passthrough, with tracking capabilities.
+            content.camera = .spatialTracking
+            if let session = appModel.session {
+                sessionEntity.components[CloudXRSessionComponent.self] = .init(session: session)
+            }
+
+            content.add(sessionEntity)
+        }
+        .edgesIgnoringSafeArea(.all)
     }
 }
 

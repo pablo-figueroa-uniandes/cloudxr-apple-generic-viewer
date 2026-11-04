@@ -38,13 +38,13 @@ struct GenericImmersiveView: View {
 
             content.add(sessionEntity)
 
-            content.add(makeInvisibleGestureWall())
+            content.add(Self.makeInvisibleGestureWall())
         } update: { content in
 
         }
     }
 
-    func makeInvisibleGestureWall() -> Entity {
+    static func makeInvisibleGestureWall() -> Entity {
         // Add an invisible plane that covers the viewport, attached to the headset that can accept gestures
         // so as to not get in the way of gestures on UI objects, the plane is 20 meters away.
         let plane = Entity()

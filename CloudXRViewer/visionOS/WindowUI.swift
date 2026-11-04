@@ -47,8 +47,8 @@ struct GenericWindowUI: View {
     @State var section = Section.launch
 
     // States for the selected opaque data channel.
-    @State var currentChannelSelection: ChannelInfo?
-    @State var currentChannel: MessageChannel?
+    @State var currentChannelSelection: ViewerChannelID?
+    @State var currentChannel: (any ViewerChannel)?
 
     @Binding var application: Application
 
@@ -64,7 +64,9 @@ struct GenericWindowUI: View {
             // decide which panel to show in this window
             switch section {
             case .hud:
-                if let session = appModel.session {
+                if appModel.backend == .foveated {
+                    FoveatedStatusView()
+                } else if let session = appModel.session {
                     ScrollView {
                         HUDView(session: session, hudConfig: HUDConfig())
                     }
@@ -120,6 +122,25 @@ struct GenericWindowUI: View {
             }
 
             Spacer()
+        }
+    }
+}
+
+/// The HUD tab for the foveated backend. Apple's framework does not publish streaming
+/// statistics, so this shows the session state and what foveation does with the user's gaze.
+struct FoveatedStatusView: View {
+    @Environment(AppModel.self) var appModel
+    @AppStorage("foveatedEndpointKind") var foveatedEndpointKind: FoveatedEndpointKind = .discover
+
+    var body: some View {
+        Form {
+            LabeledContent("Backend", value: appModel.backend.label)
+            LabeledContent("Server", value: foveatedEndpointKind.rawValue)
+            LabeledContent("Status", value: appModel.activeSession?.statusDescription ?? "")
+            Section {
+                Text("Dynamic foveation is active: visionOS sends the approximate region you are looking at to the CloudXR runtime, which encodes that region at full quality and the periphery at lower quality. The streamed application never receives your gaze.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

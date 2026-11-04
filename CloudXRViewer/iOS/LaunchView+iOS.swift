@@ -21,6 +21,7 @@
 import SwiftUI
 import RealityKit
 import CloudXRKit
+import StreamingSession
 
 struct LaunchView: View {
     @Environment(AppModel.self) var appModel
@@ -32,15 +33,20 @@ struct LaunchView: View {
     var body: some View {
 
         if !application.isConfigurator {
-            if appModel.showStreamingAppView {
-                BasicStreamingView(application: $application)
-            } else {
-                VStack {
-                    Spacer(minLength: 24)
-                    SessionConfigView(application: $application) {}
-                    Spacer(minLength: 24)
+            Group {
+                if appModel.showStreamingAppView {
+                    BasicStreamingView(application: $application)
+                } else {
+                    VStack {
+                        Spacer(minLength: 24)
+                        SessionConfigView(application: $application) {}
+                        Spacer(minLength: 24)
+                    }
                 }
             }
+            // System UI for finding servers and scanning their pairing QR code.
+            .deviceDiscovery(session: appModel.foveatedSession)
+            .devicePairing(session: appModel.foveatedSession)
         }
     }
 }

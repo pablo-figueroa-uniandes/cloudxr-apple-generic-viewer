@@ -30,80 +30,163 @@ extension SessionConfigView {
     @ViewBuilder
     var sessionConfigForm: some View {
         Form {
-            Section {
-                VStack {
-                    Picker("Select Zone", selection: $zone) {
-                        ForEach (Zone.allCases, id: \.self) { Text($0.rawValue) }
+            if StreamingBackend.available.count > 1 {
+                Section {
+                    Picker("Streaming Backend", selection: backendSelection) {
+                        ForEach(StreamingBackend.available, id: \.self) { Text($0.label) }
                     }
+                    .pickerStyle(.segmented)
                     .frame(width: 500)
-                    .onChange(of: zone) {
-                        if zone == .ipAddress {
-                            // Dummy call to trigger request local network permissions early
-                            NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
-                        }
-                    }
+                    .disabled(sessionConnected)
+                }
+            }
 
-                    if zone == .ipAddress {
-                        HStack {
-                            Text("IP Address")
-                                // TODO(chaoyehc): Investigate why removing the padding
-                                // causes slight misalignment in the text.
-                                .padding(.vertical, 7)
-                                .frame(alignment: .leading)
-                            Spacer()
-                            TextField("0.0.0.0", text: $hostAddress)
-                                .autocapitalization(.none)
-                                .multilineTextAlignment(.trailing)
-                                .autocorrectionDisabled(true)
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.numbersAndPunctuation)
-                                .searchDictationBehavior(.inline(activation: .onLook))
-                                .onSubmit {
-                                    // strip whitespace
-                                    hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-                                }
+            if appModel.backend == .classic {
+                Section {
+                    VStack {
+                        Picker("Select Zone", selection: $zone) {
+                            ForEach (Zone.allCases, id: \.self) { Text($0.rawValue) }
                         }
                         .frame(width: 500)
-                    } else {
-                        HStack {
-                            Picker("Select Authentication Method", selection: $authMethod) {
-                                ForEach (AuthMethod.allCases, id: \.self) { authOption in
-                                    Text(authOption.rawValue)
+                        .onChange(of: zone) {
+                            if zone == .ipAddress {
+                                // Dummy call to trigger request local network permissions early
+                                NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                            }
+                        }
+
+                        if zone == .ipAddress {
+                            HStack {
+                                Text("IP Address")
+                                    // TODO(chaoyehc): Investigate why removing the padding
+                                    // causes slight misalignment in the text.
+                                    .padding(.vertical, 7)
+                                    .frame(alignment: .leading)
+                                Spacer()
+                                TextField("0.0.0.0", text: $hostAddress)
+                                    .autocapitalization(.none)
+                                    .multilineTextAlignment(.trailing)
+                                    .autocorrectionDisabled(true)
+                                    .textInputAutocapitalization(.never)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .searchDictationBehavior(.inline(activation: .onLook))
+                                    .onSubmit {
+                                        // strip whitespace
+                                        hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    }
+                            }
+                            .frame(width: 500)
+                        } else {
+                            HStack {
+                                Picker("Select Authentication Method", selection: $authMethod) {
+                                    ForEach (AuthMethod.allCases, id: \.self) { authOption in
+                                        Text(authOption.rawValue)
+                                    }
                                 }
+                                .frame(width: 500)
+                            }
+                        }
+
+                        HStack {
+                            Text("Resolution Preset")
+                                .frame(alignment: .leading)
+                            Spacer()
+                            Picker("", selection: $resolutionPreset) {
+                                ForEach(ResolutionPreset.allCases, id: \.self) { preset in
+                                    Text(preset.rawValue)
+                                }
+                            }
+                            .disabled(sessionConnected)
+                        }
+                        .frame(width: 500)
+
+                        if zone != .ipAddress && application.appID == .unknown {
+                            HStack {
+                                Text("Enter Application ID")
+                                    .frame(alignment: .leading)
+                                Spacer()
+                                TextField("", value: $genericAppID, format: .number.grouping(.never))
+                                    .disableAutocorrection(true)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
                             }
                             .frame(width: 500)
                         }
                     }
-
-                    HStack {
-                        Text("Resolution Preset")
-                            .frame(alignment: .leading)
-                        Spacer()
-                        Picker("", selection: $resolutionPreset) {
-                            ForEach(ResolutionPreset.allCases, id: \.self) { preset in
-                                Text(preset.rawValue)
-                            }
-                        }
-                        .disabled(sessionConnected)
-                    }
-                    .frame(width: 500)
-
-                    if zone != .ipAddress && application.appID == .unknown {
-                        HStack {
-                            Text("Enter Application ID")
-                                .frame(alignment: .leading)
-                            Spacer()
-                            TextField("", value: $genericAppID, format: .number.grouping(.never))
-                                .disableAutocorrection(true)
-                                .keyboardType(.numberPad)
-                                .multilineTextAlignment(.trailing)
-                        }
-                        .frame(width: 500)
-                    }
                 }
+            } else {
+                foveatedConfigSection
             }
         }
         .padding(.top, 100)
         .frame(minWidth: 600, maxWidth: 600, minHeight: 360, maxHeight: 690)
+    }
+
+    /// Shown under the foveated streaming settings.
+    var foveationNote: String {
+        "Streams with Apple's StreamingSession framework. Foveation needs eye tracking, which is only available on Apple Vision Pro."
+    }
+
+    @ViewBuilder
+    var foveatedConfigSection: some View {
+        Section {
+            VStack {
+                Picker("Server", selection: $foveatedEndpointKind) {
+                    ForEach(FoveatedEndpointKind.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .frame(width: 500)
+                .onChange(of: foveatedEndpointKind) {
+                    if foveatedEndpointKind == .local {
+                        // Dummy call to trigger request local network permissions early
+                        NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                    }
+                }
+
+                switch foveatedEndpointKind {
+                case .discover:
+                    EmptyView()
+                case .local:
+                    HStack {
+                        Text("IP Address")
+                        Spacer()
+                        TextField("0.0.0.0", text: $hostAddress)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled(true)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.numbersAndPunctuation)
+                            .onSubmit {
+                                // strip whitespace
+                                hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                    }
+                    .frame(width: 500)
+                    HStack {
+                        Text("Port")
+                        Spacer()
+                        TextField("", value: $foveatedPort, format: .number.grouping(.never))
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .frame(width: 500)
+                case .remote:
+                    HStack {
+                        Text("Server Name")
+                        Spacer()
+                        TextField("server.example.com", text: $remoteServerName)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled(true)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                    }
+                    .frame(width: 500)
+                }
+
+                Text(foveationNote)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 500, alignment: .leading)
+            }
+            .disabled(sessionConnected)
+        }
     }
 }

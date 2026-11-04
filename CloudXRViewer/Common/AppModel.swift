@@ -21,15 +21,66 @@
 import SwiftUI
 import RealityKit
 import CloudXRKit
+#if FOVEATED_STREAMING
+#if os(visionOS)
+import FoveatedStreaming
+#else
+import StreamingSession
+#endif
+#endif
 
 struct SavedSettings {
     @AppStorage("application") static var application: Application = .generic_viewer
+    @AppStorage("streamingBackend") static var backend: StreamingBackend = .classic
 }
 
 /// The data that the app uses to configure its views.
+@MainActor
 @Observable
 public class AppModel {
+    /// The CloudXRKit session, created on the first classic connection.
     public var session: Session?
+
+#if FOVEATED_STREAMING
+    /// The foveated streaming session. It lives as long as the app because the visionOS
+    /// `ImmersiveSpace(foveatedStreaming:)` scene is built from it.
+    let foveatedSession = FoveatedStreamingSession()
+#endif
+
+    var backend = StreamingBackend.available.contains(SavedSettings.backend) ? SavedSettings.backend : .classic {
+        didSet {
+            SavedSettings.backend = backend
+        }
+    }
+
+    /// The session of the selected backend, if it exists.
+    var activeSession: (any ViewerSession)? {
+        switch backend {
+        case .classic:
+            session.map { ClassicSession($0) }
+        case .foveated:
+#if FOVEATED_STREAMING
+            foveatedSession
+#else
+            nil
+#endif
+        }
+    }
+
+    var status: ViewerStatus {
+        activeSession?.viewerStatus ?? .initialized
+    }
+
+    var connectionState: ConnectionState {
+        ConnectionState(backend: backend, status: status)
+    }
+
+    /// Why the last foveated connection attempt failed before the session reported a status.
+    var foveatedConnectError: String?
+
+    func disconnect() async {
+        await activeSession?.disconnect()
+    }
 
 #if DEBUG
     var disableFeedback = true
@@ -42,15 +93,7 @@ public class AppModel {
     var showDisconnectionAlert = false
 
     var showStreamingAppView: Bool {
-        guard let session else {
-            return false
-        }
-
-        if session.state == .connected {
-            return true
-        }
-
-        return false
+        status == .connected
     }
 
     var application = SavedSettings.application {

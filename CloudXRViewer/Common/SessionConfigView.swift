@@ -21,6 +21,13 @@
 import SwiftUI
 import CloudXRKit
 import OSLog
+#if FOVEATED_STREAMING
+#if os(visionOS)
+import FoveatedStreaming
+#else
+import StreamingSession
+#endif
+#endif
 
 struct SessionConfigView: View {
     @AppStorage("hostAddress") var hostAddress: String = ""
@@ -34,11 +41,17 @@ struct SessionConfigView: View {
 
     @AppStorage("genericAppID") var genericAppID: Int = 0
 
+    // Foveated streaming endpoint; the manual IP address reuses `hostAddress`.
+    @AppStorage("foveatedEndpointKind") var foveatedEndpointKind: FoveatedEndpointKind = .discover
+    @AppStorage("foveatedPort") var foveatedPort: Int = FoveatedEndpointKind.defaultPort
+    @AppStorage("remoteServerName") var remoteServerName: String = ""
+
     @Environment(AppModel.self) var appModel
     @Environment(\.colorScheme) var colorScheme
 
 #if os(visionOS)
     @Environment(\.openImmersiveSpace) var openImmersiveSpace
+    @Environment(\.dismissImmersiveSpace) var dismissImmersiveSpace
     // TODO(tifchen): Revisit whether this can be included for iOS.
 #endif
 
@@ -55,17 +68,12 @@ struct SessionConfigView: View {
     @State var isGuestModePopoverPresented: Bool = false
 
     var sessionConnected: Bool {
-        if let session = appModel.session {
-            switch session.state {
-            case .initialized, .disconnected, .paused:
-                false
-            default:
-                true
-            }
-        } else {
+        switch appModel.status {
+        case .initialized, .disconnected, .paused:
             false
+        default:
+            true
         }
-
     }
 
     private static let logger = Logger(
@@ -152,15 +160,15 @@ struct SessionConfigView: View {
         ) {
             if !appModel.disableFeedback {
                 Button("Disconnect with feedback") {
-                    appModel.session?.disconnect()
+                    Task { await appModel.disconnect() }
                     appModel.isRatingViewPresented = true
                 }
                 Button("Disconnect without feedback", role: .destructive) {
-                    appModel.session?.disconnect()
+                    Task { await appModel.disconnect() }
                 }
             } else {
                 Button("Disconnect", role: .destructive) {
-                    appModel.session?.disconnect()
+                    Task { await appModel.disconnect() }
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -168,6 +176,13 @@ struct SessionConfigView: View {
     }
 
     private func handleConnectButtonTap() {
+#if FOVEATED_STREAMING
+        if appModel.backend == .foveated {
+            handleFoveatedConnectButtonTap()
+            return
+        }
+#endif
+
         if appModel.session?.state == .paused {
             try! appModel.session?.resume()
             self.completionHandler()
@@ -250,6 +265,64 @@ struct SessionConfigView: View {
             completionHandler()
         }
     }
+
+#if FOVEATED_STREAMING
+    private func handleFoveatedConnectButtonTap() {
+        let session = appModel.foveatedSession
+
+        switch session.status {
+        case .paused:
+            Task { @MainActor in
+                do {
+                    try await session.resume()
+                    completionHandler()
+                } catch {
+                    Self.logger.error("Foveated streaming resume failed: \(error.localizedDescription)")
+                    appModel.foveatedConnectError = error.localizedDescription
+                }
+            }
+        case .connected:
+            appModel.showDisconnectionAlert = true
+        default:
+            doConnectFoveated()
+        }
+    }
+
+    private func doConnectFoveated() {
+        let session = appModel.foveatedSession
+        appModel.foveatedConnectError = nil
+
+        Task { @MainActor in
+            do {
+                let endpoint = try foveatedEndpointKind.endpoint(
+                    hostAddress: hostAddress,
+                    port: foveatedPort,
+                    serverName: remoteServerName
+                )
+
+#if os(visionOS)
+                // The session opens the immersive space once streaming starts and dismisses it
+                // on disconnect, so neither LaunchView nor WindowStateManager opens it.
+                session.immersivePresentationBehaviors = .automatic(openImmersiveSpace, dismissImmersiveSpace)
+
+                if #available(visionOS 27.0, *) {
+                    let capabilities: Set<FoveatedStreamingSession.InputCapability> = enableHandTracking ? [.handTracking] : []
+                    if !capabilities.isEmpty {
+                        _ = await session.requestAuthorization(for: capabilities)
+                    }
+                    session.requestedInputCapabilities = capabilities
+                }
+#endif
+
+                try await session.connect(endpoint: endpoint)
+                completionHandler()
+            } catch {
+                Self.logger.error("Foveated streaming connection failed: \(error.localizedDescription)")
+                appModel.foveatedConnectError = error.localizedDescription
+            }
+        }
+    }
+#endif
 }
 
 #Preview {

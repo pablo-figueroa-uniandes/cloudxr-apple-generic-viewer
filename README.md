@@ -5,6 +5,7 @@ A complete reference implementation of a CloudXR client application that demonst
 ## Features
 
 - **CloudXRKit SDK integration** - Complete reference implementation
+- **Foveated streaming** - Apple's Foveated Streaming framework on visionOS, selectable next to CloudXRKit; Apple's StreamingSession framework on iOS
 - **Full 6DOF tracking support** - Complete head and hand tracking
 - **Opaque data channel communication** - Bidirectional messaging with server
 - **Hand tracking visualization** - Real-time finger joint tracking display
@@ -16,25 +17,35 @@ A complete reference implementation of a CloudXR client application that demonst
 
 This Generic Viewer serves as a complete reference implementation for developers building CloudXR client applications on Apple platforms. It demonstrates best practices for CloudXRKit SDK integration and provides a solid foundation that can be customized or extended for specific use cases.
 
+The configuration screen offers two streaming backends:
+
+| Backend | Platforms | What it does |
+|---|---|---|
+| **CloudXR** | visionOS, iOS | The CloudXRKit Swift package, as in earlier versions: NVIDIA GDN or a manual IP address, resolution presets, HUD and network statistics. |
+| **Foveated Streaming** | visionOS | Apple's [Foveated Streaming](https://developer.apple.com/documentation/foveatedstreaming) system framework. The headset shares the approximate region the user is looking at with the CloudXR Runtime, which encodes that region at full quality and the periphery at lower quality. The streamed OpenXR application never receives the gaze. Servers are found through system discovery and QR-code pairing, by IP address and port, or by remote server name. |
+| **Streaming Session** | iOS | Apple's [StreamingSession](https://github.com/apple/streamingsession) package, which has the same API as Foveated Streaming without eye tracking. |
+
+Both backends share the window management and the opaque data channel UI (`Common/Streaming/` adapts each SDK to a common `ViewerSession` protocol), so the same server can be compared with and without foveation.
+
 ## System Requirements
 
 ### Development Requirements
 
 - **macOS** development machine (Apple Silicon or Intel)
-- **Xcode 16.4** or later
+- **Xcode 26.4** or later (tested with Xcode 27.2)
 - **Swift 5.9** or later
-- **visionOS 2.4 SDK** (for visionOS development)
-- **iOS 18.0 SDK** (for iOS/iPadOS development)
+- **visionOS 26.4 SDK** (for visionOS development)
+- **iOS 27.0 SDK** (for iOS/iPadOS development; required by the StreamingSession package)
 
 ### visionOS Requirements
 
 - **Apple Vision Pro** device
-- **visionOS 2.4** or later
+- **visionOS 26.4** or later (hand tracking over Foveated Streaming needs visionOS 27)
 - **WiFi connection**: 100 Mbps minimum, 200 Mbps recommended
 
 ### iOS/iPadOS Requirements
 
-- **iOS 18.0** or **iPadOS 18.0** or later
+- **iOS 27.0** or **iPadOS 27.0** or later
 - Device with **ARKit support** (see [Apple's AR-compatible devices](https://www.apple.com/augmented-reality/))
 - **WiFi connection**: 100 Mbps minimum, 200 Mbps recommended
 
@@ -55,23 +66,18 @@ Open the Xcode project:
 open CloudXRViewer.xcodeproj
 ```
 
-### 3. Add CloudXR Framework Package
+### 3. Swift Package Dependencies
 
-You need to add the CloudXR Framework as a dependency:
+The project references its packages, and Xcode resolves them when the project opens:
 
-#### Option A: Add from Package Repository (Recommended)
+- `https://github.com/NVIDIA/cloudxr-framework` (CloudXRKit) for both targets
+- `https://github.com/apple/streamingsession` (StreamingSession) for `CloudXRViewer-iOS`
 
-1. In Xcode, right-click on the project in Project Navigator
-2. Select **"Add Package Dependencies"**
-3. Enter the package URL: `https://github.com/NVIDIA/cloudxr-framework`
-4. Click **"Add Package"**
-5. Select the target(s) you want to build:
-   - `CloudXRViewer-visionOS` for Apple Vision Pro
-   - `CloudXRViewer-iOS` for iPhone/iPad
+Foveated Streaming itself is a visionOS system framework, so it needs no package.
 
-#### Option B: Add Local Framework
+#### Using a Local CloudXR Framework
 
-If you have a local copy of the CloudXR Framework:
+If you have a local copy of the CloudXR Framework, replace the remote `cloudxr-framework` package with it:
 
 1. Download the CloudXR Framework (e.g., `cloudxr-sdk-external-6.0.2-rc2.zip`)
 2. Unzip the framework to a local directory
@@ -89,6 +95,8 @@ If you have a local copy of the CloudXR Framework:
 2. Select your destination device or simulator
 3. Click the **Run** button or press `Cmd+R`
 
+Foveated Streaming and StreamingSession ship for devices only. visionOS Simulator builds compile the foveated backend out (the `FOVEATED_STREAMING` condition in `Config.xcconfig` is set for device SDKs only) and offer CloudXR alone. The iOS target cannot be built for the iOS Simulator, because the StreamingSession package has no simulator slice.
+
 ## Usage
 
 ### Connecting to a CloudXR Server
@@ -100,6 +108,18 @@ If you have a local copy of the CloudXR Framework:
    - Click **"Connect"**
 
 ![Connect Screen](readme-assets/Connect_Screen.png)
+
+### Connecting with Foveated Streaming
+
+The server side is a CloudXR Runtime 6.0 (or later) OpenXR application plus a process that implements Apple's [session-management protocol](https://developer.apple.com/documentation/foveatedstreaming/establishing-foveated-streaming-sessions-with-apple-vision-pro): it advertises `_apple-foveated-streaming._tcp` over mDNS, shows a pairing QR code, and starts the CloudXR Runtime. Apple's [streamingsession](https://github.com/apple/streamingsession) repository has both pieces for Windows (`StreamingSession-WindowsApp` and `StreamingSession-OpenXRSample`).
+
+1. Start `StreamingSession-WindowsApp` (and then your OpenXR application) on the server
+2. In the configuration screen, select **"Foveated Streaming"** (iOS: **"Streaming Session"**)
+3. In **"Server"**, choose:
+   - **"Discover & pair (QR code)"** to pick the server from the system's list and scan its QR code
+   - **"Manual IP address"** and enter the server's IP address and port (default `55000`)
+   - **"Remote server"** and enter the server name of a cloud deployment
+4. Click **"Connect"**. The immersive space opens by itself once the stream starts; pressing the Digital Crown pauses the session and shows the system pause sheet
 
 ### In-Headset Experience (visionOS)
 
@@ -137,6 +157,10 @@ CloudXRViewer/
 │   ├── ViewerApp.swift      # App entry point
 │   ├── SessionConfigView.swift    # Connection configuration UI
 │   ├── ServerActionsView.swift    # Data channel testing UI
+│   ├── Streaming/           # Backend abstraction
+│   │   ├── ViewerSession.swift    # StreamingBackend, ViewerStatus, ViewerSession protocol
+│   │   ├── ClassicSession.swift   # CloudXRKit adapter
+│   │   └── FoveatedSession.swift  # FoveatedStreamingSession adapter and endpoints
 │   └── ...
 ├── iOS/                     # iOS-specific implementations
 │   ├── LaunchView+iOS.swift
@@ -144,6 +168,7 @@ CloudXRViewer/
 │   └── ...
 ├── visionOS/                # visionOS-specific implementations
 │   ├── ImmersiveView.swift
+│   ├── FoveatedImmersiveView.swift  # Overlay for the foveated immersive space
 │   ├── LaunchView+visionOS.swift
 │   ├── WindowUI.swift       # Main window with HUD, Config, Actions tabs
 │   └── ...
@@ -159,6 +184,8 @@ The app supports configuration through `Config.xcconfig` for build-time settings
 ### Code Signing and Apple Developer Program
 
 If the client fails to build with code signing errors, your Apple ID likely isn't enrolled in the [Apple Developer Program (ADP)](https://developer.apple.com/programs/). Apple Low‑Latency Streaming features are available only to ADP members. Some accounts may be eligible to enroll at no cost.
+
+The Foveated Streaming backend also needs the `com.apple.developer.foveated-streaming-session` entitlement, which is in the same entitlements file.
 
 **To disable Low-Latency Streaming and build without ADP:**
 
@@ -190,8 +217,8 @@ Many institutional or enterprise WiFi networks prevent devices from reaching eac
 
 ### Build Issues
 
-- Verify you're using Xcode 16.4 or later
-- Ensure the CloudXR Framework package is properly added to your target
+- Verify you're using Xcode 26.4 or later
+- Ensure the Swift packages resolved (File > Packages > Resolve Package Versions)
 - Clean the build folder (Product > Clean Build Folder) and rebuild
 
 ### Performance Issues
@@ -208,6 +235,9 @@ See [LICENSE](LICENSE) file for details.
 
 - [CloudXR Framework](https://github.com/NVIDIA/cloudxr-framework)
 - [CloudXR Documentation](https://docs.nvidia.com/cloudxr-sdk)
+- [CloudXR Foveated Streaming guide](https://docs.nvidia.com/cloudxr-sdk/latest/usr_guide/foveated_streaming/index.html)
+- [Apple Foveated Streaming documentation](https://developer.apple.com/documentation/foveatedstreaming)
+- [apple/streamingsession](https://github.com/apple/streamingsession)
 
 ## Contributing
 

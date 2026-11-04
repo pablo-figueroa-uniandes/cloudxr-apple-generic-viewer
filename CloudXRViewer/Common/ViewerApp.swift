@@ -26,6 +26,9 @@ import simd
 // For measuring render camera positions.
 import CompositorServices
 #endif
+#if FOVEATED_STREAMING && os(visionOS)
+import FoveatedStreaming
+#endif
 
 let launchTitle = "launch"
 let contentTitle = "content"
@@ -78,6 +81,9 @@ struct ViewerApp: App {
                 .alert(isPresented: $showDisconnectionErrorAlert) {
                     makeDisconnectionAlert()
                 }
+#if FOVEATED_STREAMING
+                .foveatedStreamingPauseSheet(session: foveatedPauseSheetSession)
+#endif
                 .onAppear {
                     appModel.windowStateManager.configure(
                         appModel: appModel,
@@ -91,10 +97,10 @@ struct ViewerApp: App {
                 .onDisappear {
                     appModel.windowStateManager.windowOnDisappear(windowId: launchTitle)
                 }
-                .onChange(of: appModel.session?.state) { oldState, newState in
-                    guard let oldState, let newState else { return }
+                .onChange(of: appModel.connectionState) { oldState, newState in
+                    guard oldState.backend == newState.backend else { return }
                     Task {
-                        await appModel.windowStateManager.onConnectionStateChanged(oldState: oldState, newState: newState)
+                        await appModel.windowStateManager.onConnectionStateChanged(oldState: oldState.status, newState: newState.status)
                     }
                 }
         }
@@ -126,10 +132,10 @@ struct ViewerApp: App {
                 .onDisappear {
                     appModel.windowStateManager.windowOnDisappear(windowId: contentTitle)
                 }
-                .onChange(of: appModel.session?.state) { oldState, newState in
-                    guard let oldState, let newState else { return }
+                .onChange(of: appModel.connectionState) { oldState, newState in
+                    guard oldState.backend == newState.backend else { return }
                     Task {
-                        await appModel.windowStateManager.onConnectionStateChanged(oldState: oldState, newState: newState)
+                        await appModel.windowStateManager.onConnectionStateChanged(oldState: oldState.status, newState: newState.status)
                     }
                 }
         }
@@ -166,22 +172,44 @@ struct ViewerApp: App {
             }
         }
         .environment(appModel)
-        .onChange(of: appModel.session?.state) { oldState, newState in
-            guard let oldState, let newState else { return }
-            if case SessionState.disconnected = oldState {
+        .onChange(of: appModel.connectionState) { oldState, newState in
+            guard oldState.backend == newState.backend else { return }
+            if oldState.status.isDisconnected {
                 return
             }
-            if case SessionState.disconnected = newState {
+            if newState.status.isDisconnected {
                 Task {
                     if !Self.persistLaunchWindow {
                         openWindow(id: launchTitle)
                     }
-                    await dismissImmersiveSpace()
+                    if appModel.backend == .classic {
+                        await dismissImmersiveSpace()
+                    }
                     alertAndRetryIfError()
                 }
             }
         }
+
+#if FOVEATED_STREAMING
+        // Foveated streaming. The scene renders the stream itself; the session opens and dismisses
+        // it through `immersivePresentationBehaviors`, set in SessionConfigView before connecting.
+        ImmersiveSpace(foveatedStreaming: appModel.foveatedSession) {
+            FoveatedImmersiveView()
+        }
+        .environment(appModel)
+        .immersionStyle(selection: .constant(.progressive), in: .progressive)
+#endif
     }
+
+#if FOVEATED_STREAMING
+    /// The session whose system pause sheet is shown; nil while the classic backend is selected.
+    var foveatedPauseSheetSession: Binding<FoveatedStreamingSession?> {
+        Binding(
+            get: { appModel.backend == .foveated ? appModel.foveatedSession : nil },
+            set: { _ in }
+        )
+    }
+#endif
 #elseif os(iOS)
     var body: some Scene {
         WindowGroup {
@@ -193,12 +221,12 @@ struct ViewerApp: App {
                     makeDisconnectionAlert()
                 }
                 .environment(appModel)
-                .onChange(of: appModel.session?.state) { oldState, newState in
-                    guard let oldState, let newState else { return }
-                    if case SessionState.disconnected = oldState {
+                .onChange(of: appModel.connectionState) { oldState, newState in
+                    guard oldState.backend == newState.backend else { return }
+                    if oldState.status.isDisconnected {
                         return
                     }
-                    if case SessionState.disconnected = newState {
+                    if newState.status.isDisconnected {
                         Task {
                             alertAndRetryIfError()
                         }
@@ -206,16 +234,18 @@ struct ViewerApp: App {
                 }
                 .onChange(of: scenePhase) {
                     if scenePhase == .background {
-                        switch appModel.session?.state {
+                        switch appModel.status {
                         case .connecting, .connected:
-                            appModel.session?.pause()
+                            Task {
+                                try? await appModel.activeSession?.pause()
+                            }
                         default:
                             return
                         }
                     } else if scenePhase == .active {
-                        if appModel.session?.state == SessionState.paused {
+                        if appModel.status == .paused {
                             Task {
-                                try appModel.session?.resume()
+                                try await appModel.activeSession?.resume()
                             }
                         }
                     }
@@ -225,9 +255,7 @@ struct ViewerApp: App {
 #endif
 
     func alertAndRetryIfError() {
-        if let state = appModel.session?.state,
-           case SessionState.disconnected(error: Result.failure(_)) = state
-        {
+        if case .disconnected(error: .some) = appModel.status {
             showDisconnectionErrorAlert = true
         }
 
@@ -237,8 +265,13 @@ struct ViewerApp: App {
         var errorMessage = "Connection failed without returning an error"
         let debugTips = "Please validate the configuration and, if using a local server instead of GDN, verify that Omniverse is ready."
 
+        // The foveated session reports a single reason.
+        if appModel.backend == .foveated, case .disconnected(error: let reason?) = appModel.status {
+            errorMessage = "\(reason)\n\nPlease validate the configuration and verify that the streaming server is running and advertising itself."
+        }
+
         // First check appModel session state
-        switch appModel.session?.state {
+        switch appModel.backend == .classic ? appModel.session?.state : nil {
         case .disconnected(let result):
             switch(result) {
             case .failure(let error):

@@ -89,12 +89,23 @@ enum Application: String, CaseIterable {
 
 extension SessionConfigView {
 
+    var backendSelection: Binding<StreamingBackend> {
+        Binding(
+            get: { appModel.backend },
+            set: { appModel.backend = $0 }
+        )
+    }
+
     var stateDescription: String {
-        appModel.session?.state.description ?? ""
+        let description = appModel.activeSession?.statusDescription ?? ""
+        if appModel.backend == .foveated, let error = appModel.foveatedConnectError {
+            return "\(description): \(error)"
+        }
+        return description
     }
 
     var buttonLabel: String {
-        switch appModel.session?.state {
+        switch appModel.status {
         case .connected: "Disconnect"
         case .paused, .pausing: "Resume"
         default: "Connect"
@@ -106,8 +117,8 @@ extension SessionConfigView {
     }
 
     var connectButtonDisabled: Bool {
-        switch appModel.session?.state {
-        case .connecting, .authenticating, .authenticated, .disconnecting, .resuming, .pausing:
+        switch appModel.status {
+        case .connecting, .disconnecting, .resuming, .pausing:
             true
         default:
             false

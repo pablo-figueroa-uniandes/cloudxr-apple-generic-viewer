@@ -65,6 +65,8 @@ struct MainContentView: View {
             }
         }
         .ornament(
+            // CloudXRKit's network statistics; the foveated backend does not publish them.
+            visibility: appModel.backend == .classic ? .visible : .hidden,
             attachmentAnchor: .scene(.init(x: 0.98, y: -0.02)),
             contentAlignment: .bottomTrailing
         ) {

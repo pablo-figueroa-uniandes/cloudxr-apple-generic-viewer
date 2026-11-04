@@ -42,67 +42,137 @@ extension SessionConfigView {
     @ViewBuilder
     var sessionConfigForm: some View {
         Form {
-            Section {
-                Picker("Select Zone", selection: $zone) {
-                    ForEach (Zone.allCases, id: \.self) { Text($0.rawValue) }
-                }
-                .onChange(of: zone) {
-                    if zone == .ipAddress {
-                        // Dummy call to trigger request local network permissions early
-                        NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
-                    }
-                }
-
-                if zone == .ipAddress {
-                    HStack {
-                        Text("IP Address")
-                        Spacer()
-                        TextField("0.0.0.0", text: $hostAddress)
-                            .autocapitalization(.none)
-                            .multilineTextAlignment(.trailing)
-                            .autocorrectionDisabled(true)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.numbersAndPunctuation)
-                            .searchDictationBehavior(.inline(activation: .onLook))
-                            .onSubmit {
-                                // strip whitespace
-                                hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-                            }
-                    }
-                } else {
-                    HStack {
-                        Picker("Select Authentication Method", selection: $authMethod) {
-                            ForEach (AuthMethod.allCases, id: \.self) { authOption in
-                                Text(authOption.rawValue)
-                            }
-                        }
-                    }
-                }
-
-                if !application.isConfigurator {
-                    Toggle("Enable Hand Tracking", isOn: $enableHandTracking)
-                }
-
-                if zone != .ipAddress && application.appID == .unknown {
-                    HStack {
-                        Text("Enter Application ID")
-                        Spacer()
-                        TextField("", value: $genericAppID, format: .number.grouping(.never))
-                            .disableAutocorrection(true)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                    }
-                }
-
+            if StreamingBackend.available.count > 1 {
                 Section {
-                    Picker("Resolution Preset", selection: $resolutionPreset) {
-                        ForEach(ResolutionPreset.allCases, id: \.self) { preset in
-                            Text(preset.rawValue)
-                        }
-                    }.disabled(sessionConnected)
+                    Picker("Streaming Backend", selection: backendSelection) {
+                        ForEach(StreamingBackend.available, id: \.self) { Text($0.label) }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(sessionConnected)
                 }
+            }
+
+            if appModel.backend == .classic {
+                Section {
+                    Picker("Select Zone", selection: $zone) {
+                        ForEach (Zone.allCases, id: \.self) { Text($0.rawValue) }
+                    }
+                    .onChange(of: zone) {
+                        if zone == .ipAddress {
+                            // Dummy call to trigger request local network permissions early
+                            NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                        }
+                    }
+
+                    if zone == .ipAddress {
+                        HStack {
+                            Text("IP Address")
+                            Spacer()
+                            TextField("0.0.0.0", text: $hostAddress)
+                                .autocapitalization(.none)
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled(true)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.numbersAndPunctuation)
+                                .searchDictationBehavior(.inline(activation: .onLook))
+                                .onSubmit {
+                                    // strip whitespace
+                                    hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                                }
+                        }
+                    } else {
+                        HStack {
+                            Picker("Select Authentication Method", selection: $authMethod) {
+                                ForEach (AuthMethod.allCases, id: \.self) { authOption in
+                                    Text(authOption.rawValue)
+                                }
+                            }
+                        }
+                    }
+
+                    if !application.isConfigurator {
+                        Toggle("Enable Hand Tracking", isOn: $enableHandTracking)
+                    }
+
+                    if zone != .ipAddress && application.appID == .unknown {
+                        HStack {
+                            Text("Enter Application ID")
+                            Spacer()
+                            TextField("", value: $genericAppID, format: .number.grouping(.never))
+                                .disableAutocorrection(true)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+
+                    Section {
+                        Picker("Resolution Preset", selection: $resolutionPreset) {
+                            ForEach(ResolutionPreset.allCases, id: \.self) { preset in
+                                Text(preset.rawValue)
+                            }
+                        }.disabled(sessionConnected)
+                    }
+                }
+            } else {
+                foveatedConfigSection
             }
         }
         .frame(minHeight: 420, maxHeight: 790)
+    }
+
+    @ViewBuilder
+    var foveatedConfigSection: some View {
+        Section {
+            Picker("Server", selection: $foveatedEndpointKind) {
+                ForEach(FoveatedEndpointKind.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .onChange(of: foveatedEndpointKind) {
+                if foveatedEndpointKind == .local {
+                    // Dummy call to trigger request local network permissions early
+                    NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                }
+            }
+
+            switch foveatedEndpointKind {
+            case .discover:
+                EmptyView()
+            case .local:
+                HStack {
+                    Text("IP Address")
+                    Spacer()
+                    TextField("0.0.0.0", text: $hostAddress)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled(true)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.numbersAndPunctuation)
+                        .onSubmit {
+                            // strip whitespace
+                            hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                }
+                HStack {
+                    Text("Port")
+                    Spacer()
+                    TextField("", value: $foveatedPort, format: .number.grouping(.never))
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
+            case .remote:
+                HStack {
+                    Text("Server Name")
+                    Spacer()
+                    TextField("server.example.com", text: $remoteServerName)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled(true)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                }
+            }
+
+            if #available(visionOS 27.0, *) {
+                Toggle("Enable Hand Tracking", isOn: $enableHandTracking)
+            }
+        }
+        .disabled(sessionConnected)
     }
 }

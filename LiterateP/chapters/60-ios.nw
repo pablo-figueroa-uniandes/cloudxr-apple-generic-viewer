@@ -1,0 +1,452 @@
+\chapter{The iOS User Interface}\label{ch:ios}
+
+On iOS the whole application lives in one window. The configuration form fills it until a session
+connects; then the stream fills it, with buttons along the bottom edge. The foveated backend here
+is Apple's StreamingSession package, which mirrors Foveated Streaming's API but has no eye
+tracking.
+
+\section{The launch view}
+
+The launch view chooses between the streaming view and the form. Two modifiers from the
+StreamingSession package attach the system's user interface for finding servers and for scanning
+a server's pairing QR code; they present it when a session connects with system discovery.
+
+<<CloudXRViewer/iOS/LaunchView+iOS.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import RealityKit
+import CloudXRKit
+import StreamingSession
+
+struct LaunchView: View {
+    @Environment(AppModel.self) var appModel
+    @Environment(\.colorScheme) var colorScheme
+    
+
+    @Binding var application: Application
+
+    var body: some View {
+
+        if !application.isConfigurator {
+            Group {
+                if appModel.showStreamingAppView {
+                    BasicStreamingView(application: $application)
+                } else {
+                    VStack {
+                        Spacer(minLength: 24)
+                        SessionConfigView(application: $application) {}
+                        Spacer(minLength: 24)
+                    }
+                }
+            }
+            // System UI for finding servers and scanning their pairing QR code.
+            .deviceDiscovery(session: appModel.foveatedSession)
+            .devicePairing(session: appModel.foveatedSession)
+        }
+    }
+}
+
+#Preview {
+    @Previewable @State var appModel = AppModel()
+
+    appModel.application = .generic_viewer
+    appModel.session = CloudXRSession(config: Config())
+
+    return LaunchView(application: $appModel.application)
+        .environment(appModel)
+}
+@nonl
+@
+\section{The configuration form}
+
+The iOS layout of [[SessionConfigView]], with the same structure as on visionOS and fixed-width
+rows.
+
+<<CloudXRViewer/iOS/SessionConfigView+iOS.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import CloudXRKit
+import Network
+
+extension SessionConfigView {
+    var body: some View {
+        mainView
+    }
+
+    @ViewBuilder
+    var sessionConfigForm: some View {
+        Form {
+            if StreamingBackend.available.count > 1 {
+                Section {
+                    Picker("Streaming Backend", selection: backendSelection) {
+                        ForEach(StreamingBackend.available, id: \.self) { Text($0.label) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 500)
+                    .disabled(sessionConnected)
+                }
+            }
+
+            if appModel.backend == .classic {
+                Section {
+                    VStack {
+                        Picker("Select Zone", selection: $zone) {
+                            ForEach (Zone.allCases, id: \.self) { Text($0.rawValue) }
+                        }
+                        .frame(width: 500)
+                        .onChange(of: zone) {
+                            if zone == .ipAddress {
+                                // Dummy call to trigger request local network permissions early
+                                NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                            }
+                        }
+
+                        if zone == .ipAddress {
+                            HStack {
+                                Text("IP Address")
+                                    // TODO(chaoyehc): Investigate why removing the padding
+                                    // causes slight misalignment in the text.
+                                    .padding(.vertical, 7)
+                                    .frame(alignment: .leading)
+                                Spacer()
+                                TextField("0.0.0.0", text: $hostAddress)
+                                    .autocapitalization(.none)
+                                    .multilineTextAlignment(.trailing)
+                                    .autocorrectionDisabled(true)
+                                    .textInputAutocapitalization(.never)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .searchDictationBehavior(.inline(activation: .onLook))
+                                    .onSubmit {
+                                        // strip whitespace
+                                        hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    }
+                            }
+                            .frame(width: 500)
+                        } else {
+                            HStack {
+                                Picker("Select Authentication Method", selection: $authMethod) {
+                                    ForEach (AuthMethod.allCases, id: \.self) { authOption in
+                                        Text(authOption.rawValue)
+                                    }
+                                }
+                                .frame(width: 500)
+                            }
+                        }
+
+                        HStack {
+                            Text("Resolution Preset")
+                                .frame(alignment: .leading)
+                            Spacer()
+                            Picker("", selection: $resolutionPreset) {
+                                ForEach(ResolutionPreset.allCases, id: \.self) { preset in
+                                    Text(preset.rawValue)
+                                }
+                            }
+                            .disabled(sessionConnected)
+                        }
+                        .frame(width: 500)
+
+                        if zone != .ipAddress && application.appID == .unknown {
+                            HStack {
+                                Text("Enter Application ID")
+                                    .frame(alignment: .leading)
+                                Spacer()
+                                TextField("", value: $genericAppID, format: .number.grouping(.never))
+                                    .disableAutocorrection(true)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            .frame(width: 500)
+                        }
+                    }
+                }
+            } else {
+                foveatedConfigSection
+            }
+        }
+        .padding(.top, 100)
+        .frame(minWidth: 600, maxWidth: 600, minHeight: 360, maxHeight: 690)
+    }
+
+@
+The foveated section adds a note, since on iOS the backend
+streams without foveation.
+
+<<CloudXRViewer/iOS/SessionConfigView+iOS.swift>>=
+    /// Shown under the foveated streaming settings.
+    var foveationNote: String {
+        "Streams with Apple's StreamingSession framework. Foveation needs eye tracking, which is only available on Apple Vision Pro."
+    }
+
+    @ViewBuilder
+    var foveatedConfigSection: some View {
+        Section {
+            VStack {
+                Picker("Server", selection: $foveatedEndpointKind) {
+                    ForEach(FoveatedEndpointKind.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .frame(width: 500)
+                .onChange(of: foveatedEndpointKind) {
+                    if foveatedEndpointKind == .local {
+                        // Dummy call to trigger request local network permissions early
+                        NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                    }
+                }
+
+                switch foveatedEndpointKind {
+                case .discover:
+                    EmptyView()
+                case .local:
+                    HStack {
+                        Text("IP Address")
+                        Spacer()
+                        TextField("0.0.0.0", text: $hostAddress)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled(true)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.numbersAndPunctuation)
+                            .onSubmit {
+                                // strip whitespace
+                                hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                    }
+                    .frame(width: 500)
+                    HStack {
+                        Text("Port")
+                        Spacer()
+                        TextField("", value: $foveatedPort, format: .number.grouping(.never))
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .frame(width: 500)
+                case .remote:
+                    HStack {
+                        Text("Server Name")
+                        Spacer()
+                        TextField("server.example.com", text: $remoteServerName)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled(true)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                    }
+                    .frame(width: 500)
+                }
+
+                Text(foveationNote)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 500, alignment: .leading)
+            }
+            .disabled(sessionConnected)
+        }
+    }
+}
+@
+\section{The streaming view}
+
+The stream is drawn by [[FoveatedStreamingView]] for the StreamingSession backend and by a
+RealityKit view with the CloudXRKit session component for the classic one. The HUD and its button
+exist only for the classic backend.
+
+<<CloudXRViewer/iOS/StreamingView+iOS.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import RealityKit
+import CloudXRKit
+import StreamingSession
+import ARKit
+import Foundation
+
+struct BasicStreamingView : View {
+    enum Section {
+        case none
+        case launch
+        case actions
+    }
+
+    @Environment(AppModel.self) var appModel
+
+    @Environment(\.colorScheme) var colorScheme
+
+    @State private var sessionEntity = Entity()
+    @State var showHUD = false
+
+    @State var selectedSection: Section = .none
+
+    @Binding var application: Application
+
+    @State var currentChannelSelection: ViewerChannelID?
+    @State var currentChannel: (any ViewerChannel)?
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if appModel.backend == .foveated {
+                FoveatedStreamingView(session: appModel.foveatedSession)
+                    .edgesIgnoringSafeArea(.all)
+            } else {
+                classicStreamView
+            }
+
+            if showHUD && appModel.backend == .classic {
+                hudView
+            }
+
+            switch selectedSection {
+            case .launch:
+                SessionConfigView(application: $application) {}
+            case .none:
+                EmptyView()
+            case .actions:
+                ServerActionsView(
+                    currentChannelSelection: $currentChannelSelection,
+                    currentChannel: $currentChannel
+                )
+                    .frame(minHeight: 160, maxHeight: 690)
+            }
+
+            // Show the overylay UI only when connected.
+            if appModel.status == .connected {
+                VStack {
+                    Spacer()
+                    // Button to enable/disable HUD.
+                    HStack {
+                        actionsButton
+                        Spacer()
+                        configButton
+                        if appModel.backend == .classic {
+                            Spacer()
+                            hudButton
+                        }
+                    }
+                }
+                .padding([.leading, .trailing, .bottom], 16)
+            } else {
+                // Show black/white background instead of passthrough when not connected.
+                (colorScheme == .dark ? Color.black : Color.white).ignoresSafeArea()
+                // Show the SessionConfigView for user to reconnect.
+                SessionConfigView(application: $application) {}
+            }
+        }
+    }
+
+@
+The classic stream view uses ARKit's spatial tracking
+camera, so the stream is composited over the camera image.
+
+<<CloudXRViewer/iOS/StreamingView+iOS.swift>>=
+    /// CloudXRKit renders through a RealityKit entity carrying the session component.
+    private var classicStreamView: some View {
+        RealityView { content in
+            sessionEntity.name = "Session"
+            // The camera that displays virtual RealityKit content and camera passthrough, with tracking capabilities.
+            content.camera = .spatialTracking
+            if let session = appModel.session {
+                sessionEntity.components[CloudXRSessionComponent.self] = .init(session: session)
+            }
+
+            content.add(sessionEntity)
+        }
+        .edgesIgnoringSafeArea(.all)
+    }
+}
+
+#Preview {
+    @Previewable @State var appModel = AppModel()
+
+    return BasicStreamingView(application: $appModel.application)
+        .environment(appModel)
+}
+@nonl
+@
+\section{Overlay buttons}
+
+The buttons along the bottom edge and the HUD overlay, unchanged from NVIDIA's code.
+
+<<CloudXRViewer/iOS/StreamingView+extensions+iOS.swift>>=
+<<NVIDIA license header>>
+
+import CloudXRKit
+import SwiftUI
+import RealityKit
+
+extension BasicStreamingView {
+    private var configButtonImage: String {
+        switch selectedSection {
+        case .launch:
+            "gearshape.fill"
+        default:
+            "gearshape"
+        }
+    }
+
+    internal var configButton: some View {
+        customButton(
+            image: configButtonImage,
+            text: "Settings",
+            action: {
+                if selectedSection == .none {
+                    selectedSection = .launch
+                } else {
+                    selectedSection = .none
+                }
+            },
+            isDisabled: selectedSection != .none && selectedSection != .launch
+        )
+    }
+
+    private var hudImage: String {
+        showHUD ? "chart.bar.fill" : "chart.bar"
+    }
+
+    internal var hudButton: some View {
+        customButton(
+            image: hudImage,
+            text: "Statistics",
+            action: {
+                showHUD.toggle()
+            }
+        )
+    }
+
+    private var actionsImage: String {
+        selectedSection == .actions ? "hand.draw.fill" : "hand.draw"
+    }
+
+    internal var actionsButton: some View {
+        customButton(
+            image: actionsImage,
+            text: "Actions",
+            action: {
+                if selectedSection == .none {
+                    selectedSection = .actions
+                } else {
+                    selectedSection = .none
+                }
+            },
+            isDisabled: selectedSection != .none && selectedSection != .actions
+        )
+    }
+
+    internal var hudView: some View {
+        HStack{
+            Spacer()
+            VStack {
+                if let session = appModel.session {
+                    HUDView(session: session, hudConfig: HUDConfig())
+                        .frame(minWidth: 200, minHeight: 200)
+                        .background(Color.black.opacity(0.7))
+                        .cornerRadius(12)
+                        .padding(.top, 50)
+                }
+                Spacer()
+            }
+            .padding(.top, 20)
+        }
+        .padding(.trailing, 20)
+    }
+}
+@nonl
+@

@@ -1,0 +1,375 @@
+\chapter{The Foveated Streaming Backend}\label{ch:foveated}
+
+On visionOS 26.4 and later, Foveated Streaming is a system framework: there is no package to add,
+only [[import FoveatedStreaming]], an entitlement, and a server that speaks Apple's session
+protocol. On iOS, Apple's StreamingSession package offers the same types without the eye tracking.
+This chapter adapts the session, presents the connection flow, and then the build configuration.
+
+\section{Endpoints}
+
+A foveated session connects to an \emph{endpoint}. [[FoveatedEndpointKind]] lists the three kinds
+the form offers:
+\begin{description}[style=nextline]
+\item[System discovery] The system browses the local network for servers advertising
+  [[_apple-foveated-streaming._tcp]], lets the user pick one, and pairs with it by scanning a QR
+  code the server displays; the code carries a client token and the server's certificate
+  fingerprint.
+\item[Local address] A server at a known IP address and port; the session-management protocol
+  listens on port 55000 by default.
+\item[Remote server] A cloud deployment reached by name through a signaling service.
+\end{description}
+The enumeration and the default port are compiled in every build because the form's stored
+settings use them; everything that touches the framework is inside [[FOVEATED_STREAMING]].
+
+<<CloudXRViewer/Common/Streaming/FoveatedSession.swift>>=
+<<MIT permission notice>>
+// Copyright (c) 2026 Pablo Figueroa and Claude.
+
+import Foundation
+import Network
+#if FOVEATED_STREAMING
+#if os(visionOS)
+import FoveatedStreaming
+#else
+import StreamingSession
+#endif
+#endif
+
+/// How the foveated session finds its server.
+enum FoveatedEndpointKind: String, CaseIterable {
+    /// The system browses for `_apple-foveated-streaming._tcp` servers and pairs with a QR code.
+    case discover = "Discover & pair (QR code)"
+    /// A server on the local network at a known address.
+    case local = "Manual IP address"
+    /// A cloud server reached through a signaling service.
+    case remote = "Remote server"
+}
+
+extension FoveatedEndpointKind {
+    /// The default port of the foveated streaming session-management protocol.
+    static let defaultPort = 55000
+}
+
+@
+[[endpoint(hostAddress:port:serverName:)]] turns the form's fields into the framework's
+[[Endpoint]], validating the address (IPv4 or IPv6), the port and the server name. Errors carry a
+message the form can show.
+
+<<CloudXRViewer/Common/Streaming/FoveatedSession.swift>>=
+#if FOVEATED_STREAMING
+struct FoveatedEndpointError: LocalizedError {
+    let errorDescription: String?
+}
+
+extension FoveatedEndpointKind {
+
+    func endpoint(hostAddress: String, port: Int, serverName: String) throws -> FoveatedStreamingSession.Endpoint {
+        switch self {
+        case .discover:
+            return .systemDiscovered
+        case .local:
+            let host = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            let ipAddress: any IPAddress
+            if let ipv4 = IPv4Address(host) {
+                ipAddress = ipv4
+            } else if let ipv6 = IPv6Address(host) {
+                ipAddress = ipv6
+            } else {
+                throw FoveatedEndpointError(errorDescription: "\"\(host)\" is not a valid IP address")
+            }
+            guard (1...Int(UInt16.max)).contains(port), let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else {
+                throw FoveatedEndpointError(errorDescription: "\(port) is not a valid port")
+            }
+            return .local(ipAddress: ipAddress, port: nwPort)
+        case .remote:
+            let name = serverName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                throw FoveatedEndpointError(errorDescription: "Enter a server name")
+            }
+            return .remote(serverName: name, signalingHeaders: [:])
+        }
+    }
+}
+
+@
+\section{The session}
+
+Unlike CloudXRKit's session, [[FoveatedStreamingSession]] conforms to [[ViewerSession]] directly:
+it is already main-actor isolated and already has [[disconnect()]], [[pause()]] and [[resume()]]
+with the protocol's signatures, so the extension only adds the status mapping, the description and
+the channels. A disconnection the application asked for is not an error;
+[[endpointInitiatedDisconnect]], [[unauthorized]] and any other reason are.
+
+<<CloudXRViewer/Common/Streaming/FoveatedSession.swift>>=
+extension FoveatedStreamingSession: ViewerSession {
+    var viewerStatus: ViewerStatus {
+        switch status {
+        case .initialized:
+            .initialized
+        case .connecting:
+            .connecting
+        case .connected:
+            .connected
+        case .pausing:
+            .pausing
+        case .paused:
+            .paused
+        case .resuming:
+            .resuming
+        case .disconnecting:
+            .disconnecting
+        case .disconnected(let reason):
+            .disconnected(error: reason == .appInitiatedDisconnect ? nil : reason.localizedDescription)
+        @unknown default:
+            .initialized
+        }
+    }
+
+@
+The framework returns the channel identifiers as a set on visionOS and as an array on
+iOS; sorting the mapped identifiers by label gives the picker a stable order on both.
+
+<<CloudXRViewer/Common/Streaming/FoveatedSession.swift>>=
+    var statusDescription: String {
+        status.description
+    }
+
+    var channelIDs: [ViewerChannelID] {
+        availableMessageChannels
+            .map { ViewerChannelID(label: "Channel \($0.label)", key: $0) }
+            .sorted { $0.label < $1.label }
+    }
+
+    func channel(for id: ViewerChannelID) -> (any ViewerChannel)? {
+        guard let channelID = id.key.base as? MessageChannel.ID else {
+            return nil
+        }
+        return messageChannel(for: channelID)
+    }
+}
+
+@
+The text form of a channel
+identifier, [[stringRepresentation]], appeared in visionOS 27. The deployment target is visionOS
+26.4, the first release with Foveated Streaming, so on older systems the label falls back to the
+identifier's description. The iOS package has the property without an availability limit.
+
+<<CloudXRViewer/Common/Streaming/FoveatedSession.swift>>=
+private extension FoveatedStreamingSession.MessageChannel.ID {
+    var label: String {
+#if os(visionOS)
+        // visionOS 26 has no public text form of a channel ID.
+        if #available(visionOS 27.0, *) {
+            return stringRepresentation
+        }
+        return String(describing: self)
+#else
+        return stringRepresentation
+#endif
+    }
+}
+
+@
+The framework's channel
+already has the stream and a throwing send; the extension adds the description.
+
+<<CloudXRViewer/Common/Streaming/FoveatedSession.swift>>=
+extension FoveatedStreamingSession.MessageChannel: ViewerChannel {
+    var statusDescription: String {
+        switch channelStatus {
+        case .ready:
+            "ready"
+        case .closed:
+            "closed"
+        @unknown default:
+            "unknown"
+        }
+    }
+
+    func send(_ data: Data) throws {
+        try sendMessage(data)
+    }
+}
+#endif
+@
+\section{Connecting}\label{sec:fovconnect}
+
+This chunk completes [[SessionConfigView]] (Chapter~\ref{ch:classic}). A tap on the button
+resumes a paused session, asks before disconnecting a connected one, and otherwise connects.
+
+Connecting first builds the endpoint. On visionOS it then hands the session the two immersive
+space actions through [[immersivePresentationBehaviors]]: with [[.automatic]], the session opens
+its immersive space when streaming starts, dismisses it when the session pauses or disconnects,
+and presents it again on resume. This is the main behavioral difference from CloudXRKit, where
+the application opens its immersive space after connecting. Letting the session do it keeps the
+space in step with the stream, including transitions the application does not initiate, such as a
+server closing the session; correspondingly, the launch view and the window manager open and
+dismiss the classic space only (Chapter~\ref{ch:visionos}).
+
+Hand tracking is an input capability the session must request. The capability type was added in
+visionOS 27, so the request is made only there, after asking the user for authorization. Then the
+session connects; any error, thrown by the endpoint validation or by the framework, is logged and
+shown under the form.
+
+<<foveated connect flow>>=
+#if FOVEATED_STREAMING
+    private func handleFoveatedConnectButtonTap() {
+        let session = appModel.foveatedSession
+
+        switch session.status {
+        case .paused:
+            Task { @MainActor in
+                do {
+                    try await session.resume()
+                    completionHandler()
+                } catch {
+                    Self.logger.error("Foveated streaming resume failed: \(error.localizedDescription)")
+                    appModel.foveatedConnectError = error.localizedDescription
+                }
+            }
+        case .connected:
+            appModel.showDisconnectionAlert = true
+        default:
+            doConnectFoveated()
+        }
+    }
+
+    private func doConnectFoveated() {
+        let session = appModel.foveatedSession
+        appModel.foveatedConnectError = nil
+
+        Task { @MainActor in
+            do {
+                let endpoint = try foveatedEndpointKind.endpoint(
+                    hostAddress: hostAddress,
+                    port: foveatedPort,
+                    serverName: remoteServerName
+                )
+
+#if os(visionOS)
+                // The session opens the immersive space once streaming starts and dismisses it
+                // on disconnect, so neither LaunchView nor WindowStateManager opens it.
+                session.immersivePresentationBehaviors = .automatic(openImmersiveSpace, dismissImmersiveSpace)
+
+                if #available(visionOS 27.0, *) {
+                    let capabilities: Set<FoveatedStreamingSession.InputCapability> = enableHandTracking ? [.handTracking] : []
+                    if !capabilities.isEmpty {
+                        _ = await session.requestAuthorization(for: capabilities)
+                    }
+                    session.requestedInputCapabilities = capabilities
+                }
+#endif
+
+                try await session.connect(endpoint: endpoint)
+                completionHandler()
+            } catch {
+                Self.logger.error("Foveated streaming connection failed: \(error.localizedDescription)")
+                appModel.foveatedConnectError = error.localizedDescription
+            }
+        }
+    }
+#endif
+@
+\section{Build configuration}\label{sec:condition}
+
+Neither library ships for the simulator: the visionOS simulator SDK has no FoveatedStreaming
+framework, and Apple's xcframework has only a device slice. The fork keeps NVIDIA's ability to run
+the classic backend in the visionOS simulator by compiling the foveated code only for device SDKs.
+The condition [[FOVEATED_STREAMING]] is set with SDK-conditional build settings in
+[[Config.xcconfig]], which all targets use as their base configuration; the [[$(inherited)]]
+keeps the [[DEBUG]] condition the targets set themselves. The iOS target cannot be built for the
+iOS simulator at all, because the StreamingSession package is linked unconditionally; NVIDIA's
+iOS client needs ARKit's spatial tracking, which the simulator lacks anyway.
+
+The file also sets the version, now 6.1.0, and the bundle identifier.
+
+<<Config.xcconfig>>=
+//
+//  Config.xcconfig
+//  CloudXR Viewer
+//
+
+// Configuration settings file format documentation can be found at:
+// https://developer.apple.com/documentation/xcode/adding-a-build-configuration-file-to-your-project
+
+// Build configuration
+MARKETING_VERSION = 6.1.0
+PRODUCT_BUNDLE_IDENTIFIER = com.nvidia.cloudxr-viewer
+
+// Apple's FoveatedStreaming framework (visionOS) and StreamingSession package (iOS) ship for
+// devices only, so the foveated backend is compiled into device builds only.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=xros*] = $(inherited) FOVEATED_STREAMING
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos*] = $(inherited) FOVEATED_STREAMING
+@
+\section{Entitlements and property lists}
+
+The visionOS target's entitlements add [[com.apple.developer.foveated-streaming-session]] to the
+low-latency streaming entitlement NVIDIA already used. Both are granted to members of the Apple
+Developer Program.
+
+
+
+<<CloudXRViewer/visionOS/CloudXRViewer-visionOS.entitlements>>=
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.foveated-streaming-session</key>
+	<true/>
+	<key>com.apple.developer.low-latency-streaming</key>
+	<true/>
+</dict>
+</plist>
+@
+System discovery browses for the Bonjour service type of Apple's session protocol. An
+application that browses the local network must declare the types it uses in
+[[NSBonjourServices]], so both property lists name [[_apple-foveated-streaming._tcp]]. The
+remaining keys are NVIDIA's: usage descriptions for hand tracking and world sensing, file sharing,
+and two application identifiers filled in from build settings.
+
+The visionOS property list:
+
+<<CloudXRViewer/visionOS/CloudXRViewer-visionOS-Info.plist>>=
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_apple-foveated-streaming._tcp</string>
+	</array>
+	<key>NSHandsTrackingUsageDescription</key>
+	<string>Enables sending hand positions to a server.</string>
+	<key>NSWorldSensingUsageDescription</key>
+	<string>Enables placing objects.</string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>NISSAN_CONFIGURATOR_APP_ID</key>
+	<string>$(NISSAN_CONFIGURATOR_APP_ID)</string>
+	<key>PURSE_CONFIGURATOR_APP_ID</key>
+	<string>$(PURSE_CONFIGURATOR_APP_ID)</string>
+</dict>
+</plist>
+@
+The iOS property list. The camera,
+local network and microphone usage descriptions are generated from build settings in the project
+file.
+
+<<CloudXRViewer/iOS/CloudXRViewer-iOS-Info.plist>>=
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_apple-foveated-streaming._tcp</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>NISSAN_CONFIGURATOR_APP_ID</key>
+	<string>$(NISSAN_CONFIGURATOR_APP_ID)</string>
+	<key>PURSE_CONFIGURATOR_APP_ID</key>
+	<string>$(PURSE_CONFIGURATOR_APP_ID)</string>
+</dict>
+</plist>
+@

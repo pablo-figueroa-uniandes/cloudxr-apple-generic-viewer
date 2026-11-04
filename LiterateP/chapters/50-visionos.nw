@@ -1,0 +1,1004 @@
+\chapter{The visionOS User Interface}\label{ch:visionos}
+
+On visionOS the application has two windows, a launch window with the configuration form and a
+content window shown while streaming, and the two immersive spaces of Chapter~\ref{ch:app}. A
+window manager keeps them consistent with the connection.
+
+\section{The window manager}
+
+[[WindowStateManager]] is NVIDIA's coordinator of windows and immersive spaces. It is now
+main-actor isolated: it reads the main-actor model, and all its callers are views. That also made
+the lock around [[pauseOnImmersiveSpaceDismissed]] unnecessary, so the property is a plain
+variable.
+
+<<CloudXRViewer/Common/WindowStateManager.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import os.log
+
+#if os(visionOS)
+// Manages the state and lifecycle of windows and immersive spaces in the application
+@MainActor
+class WindowStateManager {
+    // Logger instance for debugging and error tracking
+    private static let logger = Logger()
+
+    // Current state of windows visibility
+    private var visibleWindows: Set<String> = []
+
+    // Current state of the immersive space
+    private(set) var immersiveSpaceActive = false
+
+    // Indicates if the manager has been configured with necessary actions
+    private var configured = false
+
+    // Reference to the appModel (weak to avoid retain cycle)
+    private weak var appModel: AppModel!
+
+    // Actions for managing windows and immersive spaces
+    private var openImmersiveSpace: OpenImmersiveSpaceAction!
+    private var dismissImmersiveSpace: DismissImmersiveSpaceAction!
+    private var openWindow: OpenWindowAction!
+    private var dismissWindow: DismissWindowAction!
+
+    // When the immersive space is dismissed, we want to disconnect, but in the case of the IPD check, we do not.
+    // The manager is main-actor isolated, so this needs no lock.
+    var pauseOnImmersiveSpaceDismissed = true
+
+@
+The manager receives the environment's actions once, from the launch window.
+
+<<CloudXRViewer/Common/WindowStateManager.swift>>=
+    // Initializes the manager with necessary actions and session reference.
+    // Should be called at least once before any other functions.
+    // - Parameters:
+    //   - appModel: The app model instance
+    //   - openImmersiveSpace: Action to open immersive space
+    //   - dismissImmersiveSpace: Action to dismiss immersive space
+    //   - openWindow: Action to open window
+    //   - dismissWindow: Action to dismiss window
+    func configure(appModel: AppModel,
+                   openImmersiveSpace: OpenImmersiveSpaceAction,
+                   dismissImmersiveSpace: DismissImmersiveSpaceAction,
+                   openWindow: OpenWindowAction,
+                   dismissWindow: DismissWindowAction) {
+        self.appModel = appModel
+        self.openImmersiveSpace = openImmersiveSpace
+        self.dismissImmersiveSpace = dismissImmersiveSpace
+        self.openWindow = openWindow
+        self.dismissWindow = dismissWindow
+
+        configured = true
+    }
+
+@
+Only one window is visible at a time: showing one dismisses the others.
+
+<<CloudXRViewer/Common/WindowStateManager.swift>>=
+    // Handles window appearance event.
+    // Behavior: This will also dismiss all other existing windows.
+    //
+    // - Parameters:
+    //   - windowId: The identifier of the window that appeared
+    func windowOnAppear(windowId: String) {
+        guard configured else {
+            fatalError("WindowStateManager not initialized when windowOnAppear called")
+        }
+
+        Task { @MainActor in
+            for winId in visibleWindows {
+                if winId != windowId {
+                    dismissWindow(id: winId)
+                }
+            }
+        }
+
+        visibleWindows.insert(windowId)
+    }
+
+    // Handles window disappearance event.
+    //
+    // - Parameters:
+    //   - windowId: The identifier of the window that disappeared
+    func windowOnDisappear(windowId: String) {
+        guard configured else {
+            fatalError("WindowStateManager not initialized when windowOnDisappear called")
+        }
+        guard visibleWindows.contains(windowId) else {
+            fatalError("windowOnDisappear called when window \(windowId) is already dismissed")
+        }
+
+        visibleWindows.remove(windowId)
+    }
+
+@
+When the application becomes active with a paused session, the session is resumed. Only
+the classic immersive space is reopened here; the foveated session presents its own on resume.
+
+<<CloudXRViewer/Common/WindowStateManager.swift>>=
+    // For cases that window is closed but onDisappear() won't trigger
+    func windowOnScenePhaseChange(scenePhase: ScenePhase) {
+        guard configured else {
+            fatalError("Window state manager not configured when scene phase changed")
+        }
+        if scenePhase == .inactive {
+            for windowId in visibleWindows {
+                dismissWindow(id: windowId)
+            }
+        } else if scenePhase == .active {
+            if appModel.status == .paused {
+                Task { @MainActor in
+                    try await appModel.activeSession?.resume()
+                    // The foveated session presents its own immersive space on resume.
+                    if appModel.backend == .classic && !immersiveSpaceActive {
+                        await openImmersiveSpace(id: immersiveTitle)
+                    }
+                }
+            }
+        }
+    }
+
+    func dismissImmersiveSpaceIfOpen() {
+        if immersiveSpaceActive {
+            Task { @MainActor in
+                await dismissImmersiveSpace()
+            }
+        }
+    }
+
+@
+\section{Following the connection}
+
+Connection changes arrive from the windows' observers (Chapter~\ref{ch:app}). A new connection
+switches to the content window and, for the classic backend, opens the immersive space; a
+disconnection switches back to the launch window and, again only for the classic backend,
+dismisses the space. For the foveated backend the session does both through its presentation
+behaviors, and doing it here as well would race with it.
+
+<<CloudXRViewer/Common/WindowStateManager.swift>>=
+    func onConnectionStateChanged(oldState: ViewerStatus, newState: ViewerStatus) async {
+        switch newState {
+        case .connected:
+            await handleConnectionEstablished()
+        case .disconnected:
+            await handleDisconnection()
+        default:
+            return
+        }
+    }
+
+    private func switchWindow(newWindowId: String) {
+        guard configured else {
+            fatalError("Window manager not configured when switching window")
+        }
+
+        Task { @MainActor in
+            if !visibleWindows.contains(newWindowId) {
+                openWindow(id: newWindowId)
+            }
+        }
+    }
+
+    // Handles connection established event.
+    // Behavior: Opens immersive space and optionally hides window based on settings.
+    // The foveated session opens its immersive space itself (`immersivePresentationBehaviors`).
+    private func handleConnectionEstablished() async {
+        guard configured else {
+            fatalError("Connection established before window manager was configured")
+        }
+
+        if appModel.backend == .classic && !immersiveSpaceActive {
+            await openImmersiveSpace(id: immersiveTitle)
+        }
+
+        switchWindow(newWindowId: contentTitle)
+    }
+
+    // Handles disconnection event
+    // Behavior: Restores window visibility and dismisses immersive space
+    // (the foveated session dismisses its own).
+    private func handleDisconnection() async {
+        guard configured else {
+            fatalError("Disconnection before window manager was configured")
+        }
+
+        switchWindow(newWindowId: launchTitle)
+        if appModel.backend == .classic && immersiveSpaceActive == true {
+            await dismissImmersiveSpace()
+        }
+    }
+
+@
+\section{Following the immersive space}
+
+The immersive views report when they appear and disappear. Pressing the Digital Crown dismisses
+the immersive space; the manager then pauses the active session, whichever backend it belongs to,
+rather than leaving a stream running with nothing to show it. For a foveated session the system
+pause sheet then offers to resume or disconnect. Finally, a triple tap in the immersive space
+toggles the windows.
+
+<<CloudXRViewer/Common/WindowStateManager.swift>>=
+    func immersiveSpaceOnAppear() {
+        guard !immersiveSpaceActive else {
+            fatalError("Immersive space was already active when onAppear was called")
+        }
+
+        immersiveSpaceActive = true
+    }
+
+    // Handles immersive space dismissal (especially triggered by crown press)
+    // Behavior: Restores window visibility and pauses session if active
+    func immersiveSpaceOnDisappear() {
+        guard immersiveSpaceActive else {
+            fatalError("Immersive space state incorrect on disappear")
+        }
+
+        guard configured else {
+            fatalError("Window manager not configured when immersive space disappeared")
+        }
+
+        immersiveSpaceActive = false
+
+        // If the launch window was not visible, switch to the launch window.
+        switchWindow(newWindowId: launchTitle)
+
+        // Pause the session if necessary
+        switch appModel.status {
+        case .disconnecting, .disconnected, .initialized, .pausing, .paused:
+            return
+        default:
+            if pauseOnImmersiveSpaceDismissed {
+                // If headset is removed, dismiss immersive space rather than leaving it in background.
+                Task { @MainActor in
+                    try? await appModel.activeSession?.pause()
+                    if immersiveSpaceActive {
+                        await dismissImmersiveSpace()
+                    }
+                }
+            }
+        }
+    }
+
+    // Toggles the visibility of the window based on the current immersive space.
+    func toggleWindow() {
+        guard configured else {
+            fatalError("Window manager is not configured when toggling the window")
+        }
+
+        if !visibleWindows.isEmpty {
+            for windowId in visibleWindows {
+                dismissWindow(id: windowId)
+            }
+        }
+        else {
+            if immersiveSpaceActive {
+                switchWindow(newWindowId: contentTitle)
+            } else {
+                switchWindow(newWindowId: launchTitle)
+            }
+        }
+    }
+}
+#endif
+@nonl
+@
+\section{The launch window}
+
+The launch view shows the form. Its completion handler opens the classic immersive space after a
+classic connection and, if the user chose so, hides the launch window. After a foveated connection
+the space is already being presented by the session.
+
+<<CloudXRViewer/visionOS/LaunchView+visionOS.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import RealityKit
+import CloudXRKit
+
+struct LaunchView: View {
+    @Environment(\.openImmersiveSpace) var openImmersiveSpace
+    @Environment(\.dismissImmersiveSpace) var dismissImmersiveSpace
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.scenePhase) var scenePhase
+    @Environment(AppModel.self) var appModel
+
+
+    @Binding var application: Application
+
+    func showImmersiveSpace() {
+        Task {
+            // The foveated session presents its own immersive space when streaming starts.
+            if appModel.backend == .classic {
+                await openImmersiveSpace(id: immersiveTitle)
+            }
+            if !ViewerApp.persistLaunchWindow {
+                dismissWindow(id: launchTitle)
+            }
+        }
+    }
+
+    var body: some View {
+
+        if !application.isConfigurator {
+                // Just show the launch view while streaming.
+            VStack {
+                Spacer(minLength: 24)
+                SessionConfigView(application: $application) {
+                    showImmersiveSpace()
+                }
+                Spacer(minLength: 24)
+            }
+            .glassBackgroundEffect()
+            .onChange(of: scenePhase) {
+                appModel.windowStateManager.windowOnScenePhaseChange(scenePhase: scenePhase)
+            }
+        }
+    }
+}
+
+#Preview {
+    @Previewable @State var appModel = AppModel()
+
+    return LaunchView(application: $appModel.application)
+        .environment(appModel)
+}
+@
+\section{The configuration form}
+
+The visionOS layout of [[SessionConfigView]]. An ornament toggles NVIDIA's simplified view.
+
+<<CloudXRViewer/visionOS/SessionConfigView+visionOS.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import CloudXRKit
+import Network
+
+extension SessionConfigView {
+    var body: some View {
+        mainView
+        .ornament(
+            visibility: useSimpleConfigView ? .visible : .hidden,
+            attachmentAnchor: .scene(.init(x: 0.98, y: -0.02)),
+            contentAlignment: .bottomTrailing
+        ) {
+            Button {
+                useSimpleConfigView.toggle()
+            } label: {
+                Image(systemName: "gearshape")
+                    .padding(12)
+            }
+        }
+    }
+
+@
+The form starts with the backend picker, shown only when the build offers more than one
+backend (Section~\ref{sec:available}) and disabled during a session. The classic section is
+NVIDIA's: zone, IP address or authentication method, hand tracking, application identifier and
+resolution preset.
+
+<<CloudXRViewer/visionOS/SessionConfigView+visionOS.swift>>=
+    @ViewBuilder
+    var sessionConfigForm: some View {
+        Form {
+            if StreamingBackend.available.count > 1 {
+                Section {
+                    Picker("Streaming Backend", selection: backendSelection) {
+                        ForEach(StreamingBackend.available, id: \.self) { Text($0.label) }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(sessionConnected)
+                }
+            }
+
+            if appModel.backend == .classic {
+                Section {
+                    Picker("Select Zone", selection: $zone) {
+                        ForEach (Zone.allCases, id: \.self) { Text($0.rawValue) }
+                    }
+                    .onChange(of: zone) {
+                        if zone == .ipAddress {
+                            // Dummy call to trigger request local network permissions early
+                            NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                        }
+                    }
+
+                    if zone == .ipAddress {
+                        HStack {
+                            Text("IP Address")
+                            Spacer()
+                            TextField("0.0.0.0", text: $hostAddress)
+                                .autocapitalization(.none)
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled(true)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.numbersAndPunctuation)
+                                .searchDictationBehavior(.inline(activation: .onLook))
+                                .onSubmit {
+                                    // strip whitespace
+                                    hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                                }
+                        }
+                    } else {
+                        HStack {
+                            Picker("Select Authentication Method", selection: $authMethod) {
+                                ForEach (AuthMethod.allCases, id: \.self) { authOption in
+                                    Text(authOption.rawValue)
+                                }
+                            }
+                        }
+                    }
+
+                    if !application.isConfigurator {
+                        Toggle("Enable Hand Tracking", isOn: $enableHandTracking)
+                    }
+
+                    if zone != .ipAddress && application.appID == .unknown {
+                        HStack {
+                            Text("Enter Application ID")
+                            Spacer()
+                            TextField("", value: $genericAppID, format: .number.grouping(.never))
+                                .disableAutocorrection(true)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+
+                    Section {
+                        Picker("Resolution Preset", selection: $resolutionPreset) {
+                            ForEach(ResolutionPreset.allCases, id: \.self) { preset in
+                                Text(preset.rawValue)
+                            }
+                        }.disabled(sessionConnected)
+                    }
+                }
+            } else {
+                foveatedConfigSection
+            }
+        }
+        .frame(minHeight: 420, maxHeight: 790)
+    }
+
+@
+The foveated section offers the endpoint kind and the fields it needs. Hand tracking is
+offered only on visionOS 27, where the input capability exists. Upstream sizes the form to a fixed
+height, so the explanation of foveation lives in the HUD tab instead of a footer here.
+
+<<CloudXRViewer/visionOS/SessionConfigView+visionOS.swift>>=
+    @ViewBuilder
+    var foveatedConfigSection: some View {
+        Section {
+            Picker("Server", selection: $foveatedEndpointKind) {
+                ForEach(FoveatedEndpointKind.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .onChange(of: foveatedEndpointKind) {
+                if foveatedEndpointKind == .local {
+                    // Dummy call to trigger request local network permissions early
+                    NetServiceBrowser().searchForServices(ofType: "_http._tcp.", inDomain: "local.")
+                }
+            }
+
+            switch foveatedEndpointKind {
+            case .discover:
+                EmptyView()
+            case .local:
+                HStack {
+                    Text("IP Address")
+                    Spacer()
+                    TextField("0.0.0.0", text: $hostAddress)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled(true)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.numbersAndPunctuation)
+                        .onSubmit {
+                            // strip whitespace
+                            hostAddress = hostAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                }
+                HStack {
+                    Text("Port")
+                    Spacer()
+                    TextField("", value: $foveatedPort, format: .number.grouping(.never))
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
+            case .remote:
+                HStack {
+                    Text("Server Name")
+                    Spacer()
+                    TextField("server.example.com", text: $remoteServerName)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled(true)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                }
+            }
+
+            if #available(visionOS 27.0, *) {
+                Toggle("Enable Hand Tracking", isOn: $enableHandTracking)
+            }
+        }
+        .disabled(sessionConnected)
+    }
+}
+@
+\section{The content window}
+
+The content window hosts [[GenericWindowUI]]. Its ornament shows CloudXRKit's network quality
+and opens a statistics sheet; Foveated Streaming publishes no such statistics, so the ornament is
+hidden for that backend.
+
+<<CloudXRViewer/visionOS/MainContentView+visionOS.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import RealityKit
+import CloudXRKit
+
+struct MainContentView: View {
+    @Environment(\.openImmersiveSpace) var openImmersiveSpace
+    @Environment(\.dismissImmersiveSpace) var dismissImmersiveSpace
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.scenePhase) var scenePhase
+    @Environment(AppModel.self) var appModel
+
+
+    @Binding var application: Application
+    @State var showLiveStats: Bool = false
+
+    private func networkQualityIndicator(for quality: CloudXRKit.Session.SessionQuality?) -> (color: Color, value: Double) {
+        switch quality {
+        case .excellent:
+            return (.green, 1.0)
+        case .good:
+            return (.green, 0.75)
+        case .degraded:
+            return (.yellow, 0.5)
+        case .unsustainable:
+            return (.red, 0.25)
+        default:
+            return (.gray, 0.0)
+        }
+    }
+
+    func makeNetworkIcon() -> some View {
+        let indicator = networkQualityIndicator(for: appModel.session?.sessionQuality)
+
+        return Image(systemName: "cellularbars", variableValue: indicator.value)
+            .foregroundStyle(indicator.color)
+            .padding(12)
+    }
+
+    var body: some View {
+        VStack {
+
+            if !application.isConfigurator {
+                GenericWindowUI(application: $application)
+            }
+        }
+        .ornament(
+            // CloudXRKit's network statistics; the foveated backend does not publish them.
+            visibility: appModel.backend == .classic ? .visible : .hidden,
+            attachmentAnchor: .scene(.init(x: 0.98, y: -0.02)),
+            contentAlignment: .bottomTrailing
+        ) {
+            Button {
+                showLiveStats.toggle()
+            } label: {
+                makeNetworkIcon()
+            }
+        }
+        .sheet(isPresented: $showLiveStats) {
+            NetworkStatsView(
+                session: appModel.session,
+                onClose: { showLiveStats = false }
+            )
+        }
+    }
+}
+
+@
+The statistics sheet and its rows are NVIDIA's.
+
+<<CloudXRViewer/visionOS/MainContentView+visionOS.swift>>=
+struct NetworkStatsView: View {
+    let session: Session?
+    let onClose: () -> Void
+
+    private var stats: (latency: String, jitter: String, bandwidth: String) {
+        let latencyText = session?.liveNetworkStats.latencyMilliseconds.map(String.init) ?? "N/A"
+        let jitterText = session?.liveNetworkStats.jitterMilliseconds.map(String.init) ?? "N/A"
+        let bandwidthText = session?.liveNetworkStats.bandwidthMbps.map(String.init) ?? "N/A"
+        return (latencyText, jitterText, bandwidthText)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Network Statistics")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .padding(16)
+                }
+                .buttonStyle(.borderedProminent)
+                .contentShape(Circle())
+                .frame(width: 36, height: 36)
+            }
+            .padding(.horizontal, 36)
+            .padding(.vertical, 24)
+
+            Divider()
+                .padding(.horizontal, 8) // Inset divider slightly
+
+            // Content
+            VStack(alignment: .leading, spacing: 18) {
+                StatRow(title: "Latency", value: stats.latency, unit: "ms")
+                StatRow(title: "Jitter", value: stats.jitter, unit: "ms")
+                StatRow(title: "Bandwidth", value: stats.bandwidth, unit: "Mbps")
+            }
+            .padding(.horizontal, 36)
+            .padding(.vertical, 24)
+            .padding(.bottom, 4) // Extra bottom padding for rounded corners
+        }
+        .frame(minWidth: 320, maxWidth: 420)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .presentationDetents([.height(220)]) // Slightly taller for better proportions
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(20)
+        .presentationBackground(.clear) // Let the background show through
+    }
+}
+
+struct StatRow: View {
+    let title: String
+    let value: String
+    let unit: String
+
+    var body: some View {
+        HStack(alignment: .center) {
+            Text(title)
+                .font(.body)
+                .fontWeight(.medium)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(value)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+
+                Text(unit)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 80, alignment: .trailing)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4) // Small internal padding for better touch targets
+    }
+}
+
+#Preview {
+    @Previewable @State var appModel = AppModel()
+
+    return MainContentView(application: $appModel.application)
+        .environment(appModel)
+}
+@
+\section{Tabs of the content window}
+
+[[GenericWindowUI]] switches between three panels with buttons in an ornament. The selected
+channel is kept here, with the neutral types, so it survives switching tabs. The HUD panel shows
+CloudXRKit's HUD for the classic backend and a status view for the foveated one.
+
+<<CloudXRViewer/visionOS/WindowUI.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import CloudXRKit
+import RealityKit
+
+struct GenericWindowUI: View {
+    enum Section {
+        case hud
+        case launch
+        case actions
+
+        var title: String {
+            switch self {
+            case .hud:
+                "HUD"
+            case .launch:
+                "Config Screen"
+            case .actions:
+                "Actions"
+            }
+        }
+    }
+
+    @Environment(AppModel.self) var appModel
+    @Environment(\.openImmersiveSpace) var openImmersiveSpace
+
+    /// Current section being displayed
+    @State var section = Section.launch
+
+    // States for the selected opaque data channel.
+    @State var currentChannelSelection: ViewerChannelID?
+    @State var currentChannel: (any ViewerChannel)?
+
+    @Binding var application: Application
+
+    var body: some View {
+#if DEBUG
+        let _ = Self._printChanges()
+#endif
+
+        VStack {
+            titleBar
+                .padding(.all)
+
+            // decide which panel to show in this window
+            switch section {
+            case .hud:
+                if appModel.backend == .foveated {
+                    FoveatedStatusView()
+                } else if let session = appModel.session {
+                    ScrollView {
+                        HUDView(session: session, hudConfig: HUDConfig())
+                    }
+                }
+            case .launch:
+                SessionConfigView(application: $application) {}
+            case .actions:
+                ServerActionsView(
+                    currentChannelSelection: $currentChannelSelection,
+                    currentChannel: $currentChannel
+                )
+            }
+        }
+        .ornament(visibility: .visible, attachmentAnchor: .scene(.init(x: 0.5, y: 0.92))) {
+            // view selection "tabs" along the bottom of the window
+            HStack {
+                Button("HUD") {
+                    section = .hud
+                }
+                .selectedStyle(isSelected: section == .hud)
+                Button("Config Screen") {
+                    section = .launch
+                }
+                .selectedStyle(isSelected: section == .launch)
+                Button("Server Actions") {
+                    section = .actions
+                }
+                .selectedStyle(isSelected: section == .actions)
+            }
+            .ornamentStyle
+        }
+        // align all the useful information to the top of the window
+        Spacer()
+    }
+
+    /// The titlebar at the top of the panel showing the panel name and controls at left and right
+    var titleBar: some View {
+        HStack {
+            Spacer()
+
+            VStack{
+                // Title
+                Text(section.title)
+                    .font(UIConstants.titleFont)
+
+                Button(appModel.ratingText) {
+                    appModel.isRatingViewPresented = true
+                }
+                .disabled(appModel.disableFeedback)
+                .sheet(isPresented: Binding(get: { appModel.isRatingViewPresented }, set: { _ in } )) {
+                    StarRatingView()
+                }
+            }
+
+            Spacer()
+        }
+    }
+}
+
+@
+The foveated status view shows the backend, the
+endpoint kind and the session status, and explains what happens to the user's gaze.
+
+<<CloudXRViewer/visionOS/WindowUI.swift>>=
+/// The HUD tab for the foveated backend. Apple's framework does not publish streaming
+/// statistics, so this shows the session state and what foveation does with the user's gaze.
+struct FoveatedStatusView: View {
+    @Environment(AppModel.self) var appModel
+    @AppStorage("foveatedEndpointKind") var foveatedEndpointKind: FoveatedEndpointKind = .discover
+
+    var body: some View {
+        Form {
+            LabeledContent("Backend", value: appModel.backend.label)
+            LabeledContent("Server", value: foveatedEndpointKind.rawValue)
+            LabeledContent("Status", value: appModel.activeSession?.statusDescription ?? "")
+            Section {
+                Text("Dynamic foveation is active: visionOS sends the approximate region you are looking at to the CloudXR runtime, which encodes that region at full quality and the periphery at lower quality. The streamed application never receives your gaze.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+#Preview {
+    @Previewable @State var appModel = AppModel()
+
+    return GenericWindowUI(application: $appModel.application)
+        .environment(appModel)
+}
+@nonl
+@
+\section{The immersive views}
+
+The classic immersive view puts the CloudXRKit session on an entity, which CloudXRKit's systems
+render, and adds an invisible wall that receives taps. The wall is now a static function so the
+foveated view can reuse it.
+
+<<CloudXRViewer/visionOS/ImmersiveView.swift>>=
+<<NVIDIA license header>>
+
+import CloudXRKit
+import SwiftUI
+import RealityKit
+
+struct GenericImmersiveView: View {
+    @Environment(\.openWindow) private var openWindow
+    @Environment(AppModel.self) var appModel
+
+    @State private var sessionEntity = Entity()
+
+    var body: some View {
+        RealityView { content in
+            sessionEntity.name = "Session"
+
+            if let session = appModel.session {
+                sessionEntity.components[CloudXRSessionComponent.self] = .init(session: session)
+            }
+
+            content.add(sessionEntity)
+
+            content.add(Self.makeInvisibleGestureWall())
+        } update: { content in
+
+        }
+    }
+
+    static func makeInvisibleGestureWall() -> Entity {
+        // Add an invisible plane that covers the viewport, attached to the headset that can accept gestures
+        // so as to not get in the way of gestures on UI objects, the plane is 20 meters away.
+        let plane = Entity()
+        plane.components.set(InputTargetComponent())
+        var collision = CollisionComponent(shapes: [.generateBox(width: 40, height: 40, depth: 0.01)])
+        collision.mode = .trigger
+        plane.components.set(collision)
+        plane.position.z = -20
+        return plane
+    }
+}
+@nonl
+@
+The foveated immersive view has no session entity: the system draws the stream in the
+space. It adds the same gesture wall and reports the same lifecycle events as the classic view, so
+the window manager treats both spaces alike.
+
+<<CloudXRViewer/visionOS/FoveatedImmersiveView.swift>>=
+<<MIT permission notice>>
+// Copyright (c) 2026 Pablo Figueroa and Claude.
+
+import SwiftUI
+import RealityKit
+
+/// Overlay content for the foveated streaming immersive space.
+///
+/// `ImmersiveSpace(foveatedStreaming:)` draws the stream itself, so unlike `GenericImmersiveView`
+/// there is no session entity here: only the gesture wall that lets a triple tap bring back the
+/// window, and the same lifecycle hooks the classic immersive space uses.
+struct FoveatedImmersiveView: View {
+    @Environment(AppModel.self) var appModel
+    @Environment(\.scenePhase) var scenePhase
+
+    var body: some View {
+        RealityView { content in
+            content.add(GenericImmersiveView.makeInvisibleGestureWall())
+        }
+        .onAppear {
+            appModel.windowStateManager.immersiveSpaceOnAppear()
+        }
+        .onDisappear {
+            appModel.windowStateManager.immersiveSpaceOnDisappear()
+        }
+        .onTapGesture(count: 3) {
+            appModel.windowStateManager.toggleWindow()
+        }
+        .onChange(of: scenePhase) {
+            if scenePhase == .background { // Handle headset doffing during session
+                appModel.windowStateManager.dismissImmersiveSpaceIfOpen()
+            }
+        }
+    }
+}
+@
+\section{Styles and placement helpers}
+
+The ornament style used by the tab bar.
+
+<<CloudXRViewer/visionOS/UIStyles+visionOS.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+
+struct OrnamentStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .toggleStyle(.button)
+            .buttonStyle(.borderless)
+            .labelStyle(.iconOnly)
+            .padding(12)
+            .glassBackgroundEffect(in: .rect(cornerRadius: 50))
+    }
+}
+
+extension View {
+    /// allows adding `.ornamentStyle` to any view to use `OrnamentStyle` on it
+    var ornamentStyle: some View {
+        modifier(OrnamentStyle())
+    }
+}
+@nonl
+@
+Small vector, matrix and quaternion conveniences from NVIDIA's code.
+
+<<CloudXRViewer/visionOS/Placement/Placement+Extensions.swift>>=
+<<NVIDIA license header>>
+
+import simd
+import Spatial
+import RealityKit
+
+public extension simd_float3 {
+    static var xAxis: simd_float3 { [1, 0, 0] }
+    static var yAxis: simd_float3 { [0, 1, 0] }
+    static var zAxis: simd_float3 { [0, 0, 1] }
+}
+
+public extension simd_float4x4 {
+    static var identity: simd_float4x4 { matrix_identity_float4x4 }
+    static var zero: simd_float4x4 { simd_float4x4() }
+
+    init(radians: Float, axis: simd_float3) {
+        let quat = simd_quatf(angle: radians, axis: axis)
+        self.init(quat)
+    }
+
+    static func translation(_ x: Float, _ y: Float, _ z: Float) -> simd_float4x4 {
+        var matrix: simd_float4x4 = .identity
+        matrix[3] = [x, y, z, 1.0]
+        return matrix
+    }
+}
+
+public extension simd_quatf {
+    static var identity = simd_quatf.init(matrix_float4x4.identity)
+}
+@

@@ -1,0 +1,338 @@
+\chapter{Remaining Pieces}\label{ch:utilities}
+
+This chapter collects the configuration form's helpers and the small utilities the views use.
+
+\section{Form helpers}
+
+NVIDIA's enumerations for the authentication method, the GDN zone, application identifiers and
+applications.
+
+<<CloudXRViewer/Common/SessionConfigView+extensions.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import CloudXRKit
+import OSLog
+
+enum AuthMethod: String, CaseIterable {
+    case starfleet = "Geforce NOW login"
+    case guest = "Guest Mode"
+}
+
+enum Zone: String, CaseIterable {
+    case auto = "Auto"
+    case us_east = "US East"
+    case us_northwest = "US Northwest"
+    case us_west = "US West"
+    case eu_north = "EU North"
+    case ipAddress = "Manual IP address"
+
+    var id: String? {
+        switch self {
+        case .auto:
+            nil // automatic
+        case .us_east:
+           "np-atl-03" // "us-east"
+        case .us_northwest:
+           "np-pdx-01" // "us-northwest"
+        case .us_west:
+            "np-sjc6-04" // "us-west"
+        case .eu_north:
+            "np-sth-04" // "eu-north"
+        default:
+            nil
+        }
+    }
+}
+
+enum AppID: UInt, CaseIterable {
+    // Add CMS IDs here
+    case unknown
+
+    var rawValue: UInt {
+        switch self {
+        case .unknown:
+            return 000_000_000
+        }
+    }
+}
+
+enum Application: String, CaseIterable {
+
+
+    case generic_viewer = "Generic Viewer"
+
+    var appID: AppID {
+        switch self {
+            // Add mapping from Applications to CMS IDs here
+        default:
+            .unknown
+        }
+    }
+
+    var isConfigurator: Bool {
+        switch self {
+        case .generic_viewer:
+            false
+
+        }
+    }
+}
+
+@
+The form's computed properties. The backend binding writes
+through to the model. The status line shows the active session's own description, followed by the
+last foveated connection error if there is one. The button label and its enabled state follow the
+neutral status.
+
+<<CloudXRViewer/Common/SessionConfigView+extensions.swift>>=
+extension SessionConfigView {
+
+    var backendSelection: Binding<StreamingBackend> {
+        Binding(
+            get: { appModel.backend },
+            set: { appModel.backend = $0 }
+        )
+    }
+
+    var stateDescription: String {
+        let description = appModel.activeSession?.statusDescription ?? ""
+        if appModel.backend == .foveated, let error = appModel.foveatedConnectError {
+            return "\(description): \(error)"
+        }
+        return description
+    }
+
+    var buttonLabel: String {
+        switch appModel.status {
+        case .connected: "Disconnect"
+        case .paused, .pausing: "Resume"
+        default: "Connect"
+        }
+    }
+
+    var usingGuestMode: Bool {
+        authMethod == .guest && zone != .ipAddress
+    }
+
+    var connectButtonDisabled: Bool {
+        switch appModel.status {
+        case .connecting, .disconnecting, .resuming, .pausing:
+            true
+        default:
+            false
+        }
+    }
+}
+@nonl
+@
+\section{Feedback}
+
+The rating sheet sends feedback through CloudXRKit's session.
+
+<<CloudXRViewer/Common/StarRatingView.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import CloudXRKit
+import ARKit
+
+struct StarRatingView: View {
+
+    @State private var selectedReason = FeedbackReason.none
+    @State private var rating: Int = 0
+    @State private var ratingSelected = false
+
+    @Environment(AppModel.self) var appModel
+    var body: some View {
+        VStack {
+            Text("Rate your experience")
+                .font(.title)
+                .padding()
+            HStack {
+                ForEach(1...5, id: \.self) { star in
+                    Image(systemName: star <= rating ? "star.fill" : "star")
+                        .foregroundColor(star <= rating ? .yellow : .gray)
+                        .onTapGesture {
+                            rating = star
+                            ratingSelected = true
+                            // 5-star rating does not require a reason
+                            if rating == 5 {
+                                selectedReason = FeedbackReason.none
+                            }
+                        }
+                }
+            }
+            .font(.largeTitle)
+            .padding()
+
+            if ratingSelected && rating < 5 {
+                Picker("Select a reason", selection: $selectedReason) {
+                    ForEach(FeedbackReason.allCases, id: \.self) {
+                        if $0 == .none {
+                            Text("Please select a reason")
+                        } else {
+                            Text($0.rawValue)
+                        }
+                    }
+                }
+                .pickerStyle(MenuPickerStyle())
+                .padding()
+            }
+
+            Button("Send feedback") {
+                appModel.disableFeedback = true
+                if selectedReason == FeedbackReason.none {
+                    appModel.ratingText = "Score: \(rating)"
+                } else {
+                    appModel.ratingText = "Score: \(rating), Reason: \(selectedReason.rawValue)"
+                }
+                appModel.isRatingViewPresented = false
+                appModel.session?.sendUserFeedback(rating: rating, selectedReason: selectedReason)
+            }
+            .disabled(rating==0)
+            .padding()
+        }
+    }
+}
+@nonl
+@
+\section{Styles and constants}
+
+Layout constants and fonts.
+
+<<CloudXRViewer/Common/UIConstants.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+
+struct UIConstants {
+    /// general margin
+    static let margin: CGFloat = 20
+
+    /// size of image assets (trim is subject to being 2/3 this size)
+    static let assetWidth: CGFloat = 277
+
+    /// size of font used in toolbar at the bottom of the view
+    static let toolbarFont: Font = .custom("SF Pro", size: 17)
+        .leading(.loose)
+        .weight(.bold)
+
+    /// size of font used to headline each section of the window
+    static let sectionFont: Font = .custom("SF Pro", size: 24)
+        .leading(.loose)
+        .weight(.bold)
+
+    /// size of font used in the titlebar of the window
+    static let titleFont: Font = .custom("SF Pro", size: 29)
+        .leading(.loose)
+        .weight(.bold)
+}
+@nonl
+@
+The selected-tab style and the overlay button used on iOS.
+
+<<CloudXRViewer/Common/UIStyles.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+
+struct SelectedStyle: ViewModifier {
+    var isSelected: Bool
+    func body(content: Content) -> some View {
+        if isSelected {
+            ZStack {
+                content
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(white: 1.0, opacity: 0.1))
+            }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// allows adding `.coatSelectedStyle(isSelected: true)` to make the view look "selected" per `COATSelectedStyle`
+    func selectedStyle(isSelected: Bool) -> some View {
+        modifier(SelectedStyle(isSelected: isSelected))
+    }
+}
+
+struct CustomButtonStyle: ButtonStyle {
+    let faint = Color(red: 1, green: 1, blue: 1, opacity: 0.05)
+    var isDisabled = false
+    func makeBody(configuration: Self.Configuration) -> some View {
+        if isDisabled {
+            configuration.label
+                .background(.clear)
+        } else {
+            configuration.label
+                .background(configuration.isPressed ? faint : .clear)
+                .hoverEffect(.lift)
+        }
+    }
+}
+
+func customButton(image: String, text: String, action: @escaping () -> Void, isDisabled: Bool = false) -> some View {
+    Button(
+        action: action,
+        label: {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 15)
+                    .fill(Color.black.opacity(0.6))
+                    .frame(width: 170, height: 60)
+                HStack {
+                    Image(systemName: image)
+                        .font(.largeTitle)
+                        .foregroundColor(.white)
+
+                    Text(text)
+                        .font(.body)
+                        .foregroundColor(.white)
+                }
+                .padding(.leading, 20)
+            }
+        }
+    )
+    .disabled(isDisabled)
+    .opacity(isDisabled ? 0.5 : 1)
+}
+@nonl
+@
+A color from a hexadecimal integer.
+
+<<CloudXRViewer/Common/Color+hex.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+
+extension Color {
+    /// initialize colour using hex integer
+    init(hex: UInt, alpha: Double = 1) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xff) / 255.0,
+            green: Double((hex >> 08) & 0xff) / 255.0,
+            blue: Double((hex >> 00) & 0xff) / 255.0,
+            opacity: alpha
+        )
+    }
+}
+@nonl
+@
+\section{Debug printing}
+
+[[dprint]] prints only in debug builds.
+
+<<CloudXRViewer/Common/Utilities.swift>>=
+<<NVIDIA license header>>
+
+#if DEBUG
+func dprint(_ strings: String...) {
+    print(strings.joined(separator: " "))
+}
+#else
+func dprint(_ str: String...) { }
+#endif
+@

@@ -1,0 +1,182 @@
+\chapter{Opaque Data Channels}\label{ch:messaging}
+
+Both libraries let client and server exchange application messages over named channels, which the
+server opens. NVIDIA's viewer has a panel to try them: pick a channel, send ``Action 1'' or
+``Action 2'', and watch the replies. The panel now uses the neutral channel types of
+Chapter~\ref{ch:abstraction}, so it works with the LÖVR sample server NVIDIA provides and with
+the message channel in Apple's OpenXR sample alike.
+
+\section{Sending}
+
+The selected channel is a binding, owned by the window that hosts the panel. Sending encodes the
+text as UTF-8 and reports either the message or the error.
+
+<<CloudXRViewer/Common/ServerActionsView.swift>>=
+<<NVIDIA license header>>
+
+import SwiftUI
+import os.log
+
+struct ServerActionsView: View {
+    static var logger = Logger()
+    // Messages are sent via MessageChannel of the session in appModel.
+    @Environment(AppModel.self) var appModel
+
+    @State var lastMessageSent: String = ""
+    @State var lastMessageReceived: String = ""
+
+    @Binding var currentChannelSelection: ViewerChannelID?
+    @Binding var currentChannel: (any ViewerChannel)?
+
+    // Reader task for the currently selected channel.
+    @State private var channelReaderTask: Task<Void, Never>?
+    @State private var receivedMessageCount: Int = 0
+
+    func sendMessage(message: String) {
+        guard let channelSelection = currentChannelSelection else {
+            Self.logger.warning("No channel selected")
+            lastMessageSent = "Error - no channel"
+            return
+        }
+
+        guard let messageData = message.data(using: .utf8) else {
+            Self.logger.warning("String message could not be converted to data")
+            lastMessageSent = "Error"
+            return
+        }
+
+        if let channel = currentChannel {
+            do {
+                try channel.send(messageData)
+                lastMessageSent = message
+            } catch {
+                Self.logger.warning("Failed to send message via current channel: \(error.localizedDescription)")
+                lastMessageSent = "Error - failed to send"
+            }
+        } else {
+            Self.logger.warning("No current channel available for send")
+            lastMessageSent = "Error - no channel"
+        }
+    }
+
+@
+\section{The panel}
+
+The picker lists the active session's channels. Selecting one starts a task that reads the
+channel's message stream and shows each message with a counter; selecting another, or the channel
+disappearing, cancels the task. The reader restarts when the panel reappears.
+
+<<CloudXRViewer/Common/ServerActionsView.swift>>=
+    var body: some View {
+        Form {
+            VStack {
+                if let session = appModel.activeSession {
+                    Picker("Channels", selection: $currentChannelSelection) {
+                        ForEach(session.channelIDs, id: \.self) { channelID in
+                            Text(channelID.label).tag(channelID as ViewerChannelID?)
+                        }
+                        Text("None").tag(nil as ViewerChannelID?)
+                    }
+                    .pickerStyle(.menu)
+                    .id(session.channelIDs)
+                    .onChange(of: currentChannelSelection) {
+                        currentChannel = nil
+                        // Cancel any existing reader task when switching selection.
+                        channelReaderTask?.cancel()
+
+                        guard let channelSelection = currentChannelSelection else {
+                            return
+                        }
+                        guard let channel = session.channel(for: channelSelection) else {
+                            return
+                        }
+
+                        currentChannel = channel
+                        // Start a reader task for the selected channel.
+                        channelReaderTask = Task {
+                            for await message in channel.receivedMessageStream {
+                                receivedMessageCount += 1
+                                lastMessageReceived = "Message \(receivedMessageCount): " + String(decoding: message, as: UTF8.self)
+                            }
+                        }
+                    }
+                    .onChange(of: session.channelIDs) {
+                        if let channelSelection = currentChannelSelection,
+                           !session.channelIDs.contains(channelSelection)
+                        {
+                            currentChannelSelection = nil
+                            // Cancel reader if selection disappears.
+                            channelReaderTask?.cancel()
+                            channelReaderTask = nil
+                        }
+                    }
+
+                    if let channel = currentChannel {
+                        Text("Status: \(channel.statusDescription)")
+                    } else {
+                        Text("Status: N/A")
+                    }
+                }
+
+                Divider()
+
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button("Action 1") {
+                            sendMessage(message: "Action 1")
+                        }
+                        .disabled(currentChannelSelection == nil)
+                        .buttonStyle(.borderedProminent)
+                        Spacer()
+                        Button("Action 2") {
+                            sendMessage(message: "Action 2")
+                        }
+                        .disabled(currentChannelSelection == nil)
+                        .buttonStyle(.borderedProminent)
+                        Spacer()
+                    }
+                }
+                Divider()
+                VStack {
+                    Text("Last message sent: ")
+                    Divider()
+                    Text(lastMessageSent)
+                    Spacer()
+                }
+                Divider()
+                VStack {
+                    Text("Last message received:")
+                    Divider()
+                    Text(lastMessageReceived)
+                    Spacer()
+                }
+            }
+        }
+        .onAppear {
+            if let channel = currentChannel {
+                channelReaderTask?.cancel()
+                channelReaderTask = Task {
+                    for await message in channel.receivedMessageStream {
+                        receivedMessageCount += 1
+                        lastMessageReceived = "Message \(receivedMessageCount): " + String(decoding: message, as: UTF8.self)
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            channelReaderTask?.cancel()
+            channelReaderTask = nil
+        }
+    }
+}
+
+#Preview {
+    @Previewable @State var appModel = AppModel()
+    @Previewable @State var selection: ViewerChannelID? = nil
+    @Previewable @State var channel: (any ViewerChannel)? = nil
+    ServerActionsView(currentChannelSelection: $selection, currentChannel: $channel)
+        .environment(appModel)
+}
+@nonl
+@

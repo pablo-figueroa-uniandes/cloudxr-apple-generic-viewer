@@ -1,0 +1,137 @@
+\chapter{Introduction}\label{ch:overview}
+
+This book retells the source code of a client application for Apple Vision Pro and iPhone that
+shows immersive content rendered on another computer. The application is a fork of NVIDIA's
+\emph{CloudXR Generic Viewer}~\cite{nvviewer}, the reference client for CloudXR on Apple
+platforms. The fork keeps everything the original does and adds a second way of streaming:
+Apple's \emph{Foveated Streaming} framework~\cite{applefov}, which visionOS provides as part of
+the system, and its iOS counterpart, the \emph{StreamingSession} package~\cite{applesession}.
+
+\section{Why foveation}
+
+The human eye sees fine detail only in a small region around the point of fixation, the fovea,
+which spans a couple of degrees of the visual field. Acuity falls quickly with eccentricity: a
+few degrees away from the fixation point the eye already resolves several times less detail.
+\emph{Foveated rendering} exploits this by spending effort where the user looks and saving it
+in the periphery; Guenter et al.~\cite{guenter12} showed that rendering three nested layers at
+decreasing resolution around a tracked gaze point is indistinguishable from full resolution
+when the eye tracker is fast enough.
+
+In remote rendering the scarce resource is not only GPU time but the network: a stereo stream at
+the resolution of Vision Pro's displays needs many tens of megabits per second. With Foveated
+Streaming the headset reports the \emph{approximate region} the user is looking at to the CloudXR
+Runtime on the server, which uses it to distribute the video encoder's bit rate: the gaze region
+is encoded at full quality and the periphery more coarsely. The foveation therefore happens in the
+encoder, driven by the operating system, and not in this application. Two consequences shape the
+code:
+\begin{itemize}
+\item The client never sees gaze data. visionOS sends the focus region to the CloudXR Runtime
+  inside the session, and the runtime does not hand it to the streamed OpenXR application either
+  (NVIDIA's documentation states this explicitly~\cite{nvfov}). Eye-tracking privacy is kept by
+  construction.
+\item The client does not draw the stream itself. The system presents it in an immersive space
+  that the application declares with [[ImmersiveSpace(foveatedStreaming:)]], and the session
+  opens and closes that space on its own.
+\end{itemize}
+
+\section{Two backends}
+
+The configuration screen lets the user pick the \emph{streaming backend}:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Backend & Platform & Library \\
+\midrule
+CloudXR & visionOS, iOS & CloudXRKit Swift package (the original code path) \\
+Foveated Streaming & visionOS & FoveatedStreaming system framework \\
+Streaming Session & iOS & StreamingSession package, same API without eye tracking \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Having both in one application makes it possible to connect to the same server with and without
+foveation and compare. It also keeps the fork close to NVIDIA's code, which matters because the
+work is meant to be offered back to the original repository: the application keeps its name, its
+targets and its hand-maintained Xcode project, and the changes are as small as the design allows.
+
+The two libraries have similar but not identical APIs. Where CloudXRKit has a [[Session]] with a
+[[state]], Foveated Streaming has a [[FoveatedStreamingSession]] with a [[status]]; CloudXRKit
+disconnects synchronously, Foveated Streaming asynchronously; CloudXRKit's message channels
+return a [[Bool]] when sending, Foveated Streaming's throw. Rather than sprinkle the views with
+[[if backend == ...]] tests, the fork introduces a small protocol, [[ViewerSession]]
+(Chapter~\ref{ch:abstraction}), and one adapter per library (Chapters~\ref{ch:classic}
+and~\ref{ch:foveated}). The views talk to the protocol; only the places where the libraries
+truly differ (how a connection is configured, how the stream is drawn) look at the backend.
+
+\section{How to read this document}
+
+This is a \emph{literate program} in the sense of Donald Knuth~\cite{knuth84}: a document written
+for people, from which the program for the machine is extracted. The code appears in
+\emph{chunks}. Each chunk has a name and a number, and is written
+\[
+  \langle\textit{name}\ \textsf{\small n}\rangle \equiv
+\]
+where it is defined. A chunk may use other chunks by name. When the same name is defined again,
+the new text is appended to the old, and the header reads $+\!\equiv$. Below each chunk, a note
+tells where it is continued and where it is used. The chunk index at the end of the book lists
+every chunk.
+
+A chunk named like a file is a \emph{root}: \emph{tangling} follows its references and writes the
+file. The roots of this web are exactly the Swift sources of the application, its build
+configuration, its entitlements and its two [[Info.plist]] files, so tangling rebuilds them from
+this document. \emph{Weaving} produces the \LaTeX{} you are reading. The directory
+[[LiterateP]] holds the web ([[chapters/*.nw]]), the tool [[lit.py]] that does both jobs using
+Norman Ramsey's noweb notation~\cite{ramsey94}, and a [[Makefile]]. Running [[make check]]
+tangles the web and compares every file, byte for byte, with the sources in the repository, so
+this document cannot drift from the program without the check noticing. The Xcode project file
+is left out: Xcode maintains it.
+
+Many of NVIDIA's files end without a final newline. Their last chunk ends with the marker
+[[@nonl]], which [[lit.py]] understands, and the note under the chunk says so.
+
+\section{Plan of the book}
+
+Chapter~\ref{ch:app} presents the application object, its scenes and the shared model.
+Chapter~\ref{ch:abstraction} defines the backend-neutral vocabulary: backends, statuses, channels
+and the [[ViewerSession]] protocol. Chapter~\ref{ch:classic} adapts CloudXRKit to it and shows
+how a classic connection is configured; Chapter~\ref{ch:foveated} does the same for Foveated
+Streaming and covers the build settings, entitlements and property lists it needs.
+Chapter~\ref{ch:visionos} is the visionOS user interface and the window manager that coordinates
+windows and immersive spaces; Chapter~\ref{ch:ios} the iOS one. Chapter~\ref{ch:messaging} is the
+opaque data channel panel, and Chapter~\ref{ch:utilities} collects the remaining helpers.
+
+\section{License headers}
+
+Every Swift file of NVIDIA's code starts with the MIT permission notice followed by NVIDIA's
+copyright line. Files written for the fork carry the same notice with their own copyright line.
+The notice is written once here.
+
+The permission notice, eighteen lines of comments ending with an empty comment line:
+
+<<MIT permission notice>>=
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is furnished
+// to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice (including the next
+// paragraph) shall be included in all copies or substantial portions of the
+// Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+// FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+// OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+// WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+// OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+@
+NVIDIA's files follow it with their copyright line:
+
+<<NVIDIA license header>>=
+<<MIT permission notice>>
+// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+@

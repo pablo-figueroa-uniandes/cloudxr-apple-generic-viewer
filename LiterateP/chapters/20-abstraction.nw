@@ -1,0 +1,163 @@
+\chapter{A Vocabulary Shared by Both Backends}\label{ch:abstraction}
+
+This chapter is the single file [[ViewerSession.swift]]. It names the backends and defines the
+types that let the user interface work with either library: a status, a channel identifier, a
+channel and a session protocol. None of them imports CloudXRKit or Foveated Streaming.
+
+\section{Backends}
+
+The enumeration names the backends and gives each a label for the picker. On iOS the foveated
+case is called ``Streaming Session'' because an iPhone has no eye tracking and the stream is not
+foveated there.
+
+<<CloudXRViewer/Common/Streaming/ViewerSession.swift>>=
+<<MIT permission notice>>
+// Copyright (c) 2026 Pablo Figueroa and Claude.
+
+import Foundation
+
+/// The streaming stack used to reach the server.
+///
+/// `classic` is the CloudXRKit Swift package this viewer was built on. `foveated` is Apple's
+/// Foveated Streaming system framework on visionOS (the headset shares the approximate region the
+/// user looks at so the server spends its bits there) and Apple's StreamingSession package on iOS,
+/// which exposes the same API without eye tracking.
+enum StreamingBackend: String, CaseIterable {
+    case classic
+    case foveated
+
+    var label: String {
+        switch self {
+        case .classic:
+            "CloudXR"
+#if os(visionOS)
+        case .foveated:
+            "Foveated Streaming"
+#else
+        case .foveated:
+            "Streaming Session"
+#endif
+        }
+    }
+
+@
+\label{sec:available}[[available]] is the list the
+configuration form offers. Without [[FOVEATED_STREAMING]], that is in a simulator build, only the
+classic backend exists, and the form hides the picker.
+
+<<CloudXRViewer/Common/Streaming/ViewerSession.swift>>=
+    /// The backends this build can use; simulator builds have no foveated backend.
+    static var available: [StreamingBackend] {
+#if FOVEATED_STREAMING
+        allCases
+#else
+        [.classic]
+#endif
+    }
+}
+
+@
+\section{Status}
+
+[[ViewerStatus]] is the union of the two libraries' state machines, reduced to what the views need.
+CloudXRKit's [[authenticating]] and [[authenticated]] states fold into [[connecting]]; both
+libraries' disconnection payloads become an optional error description, [[nil]] for a clean
+disconnection. Two helpers answer the questions the views ask most.
+
+<<CloudXRViewer/Common/Streaming/ViewerSession.swift>>=
+/// Connection status shared by both backends, so the UI does not depend on either SDK's enum.
+enum ViewerStatus: Equatable {
+    case initialized
+    case connecting
+    case connected
+    case pausing
+    case paused
+    case resuming
+    case disconnecting
+    /// `error` is nil when the disconnection was clean.
+    case disconnected(error: String?)
+
+    /// The session can start a new connection.
+    var isIdle: Bool {
+        switch self {
+        case .initialized, .disconnected:
+            true
+        default:
+            false
+        }
+    }
+
+    var isDisconnected: Bool {
+        if case .disconnected = self { true } else { false }
+    }
+}
+
+@
+[[ConnectionState]] pairs the status with its backend.
+Observers compare consecutive values and ignore changes caused by switching backends
+(Section~\ref{ch:app}).
+
+<<CloudXRViewer/Common/Streaming/ViewerSession.swift>>=
+/// A status together with the backend that reported it, so observers can tell a real status
+/// change from one caused by switching backends.
+struct ConnectionState: Equatable {
+    let backend: StreamingBackend
+    let status: ViewerStatus
+}
+
+@
+\section{Channels}
+
+An opaque data channel is a bidirectional pipe for application messages between client and
+server. CloudXRKit identifies a channel by a [[ChannelInfo]], Foveated Streaming by a
+[[MessageChannel.ID]]. [[ViewerChannelID]] carries either one as an [[AnyHashable]] key, plus a
+label for the picker; each adapter casts the key back to its own type.
+
+<<CloudXRViewer/Common/Streaming/ViewerSession.swift>>=
+/// Identifies an opaque data channel independently of the backend's own channel type.
+struct ViewerChannelID: Hashable {
+    /// Human-readable name for the channel picker.
+    let label: String
+    /// The backend's own identifier (`ChannelInfo` or `FoveatedStreamingSession.MessageChannel.ID`).
+    let key: AnyHashable
+}
+
+@
+A channel delivers messages as an asynchronous stream and sends with a throwing call.
+CloudXRKit's [[MessageChannel]] reports a failed send by returning [[false]]; its adapter turns that
+into [[ChannelSendError]].
+
+<<CloudXRViewer/Common/Streaming/ViewerSession.swift>>=
+/// An open opaque data channel to the server.
+protocol ViewerChannel: AnyObject {
+    var receivedMessageStream: AsyncStream<Data> { get }
+    var statusDescription: String { get }
+    func send(_ data: Data) throws
+}
+
+struct ChannelSendError: LocalizedError {
+    var errorDescription: String? { "The message could not be sent on this channel" }
+}
+
+@
+\section{The session protocol}
+
+[[ViewerSession]] is what the views use: status, a description to show, the channels, and the
+lifecycle calls. The lifecycle calls are [[async]] because Foveated Streaming's are; CloudXRKit's
+synchronous calls satisfy them trivially. The protocol is main-actor isolated, like
+[[FoveatedStreamingSession]], so the foveated session can conform without any wrapper.
+
+<<CloudXRViewer/Common/Streaming/ViewerSession.swift>>=
+/// What the views need from a streaming session, whichever backend provides it.
+@MainActor
+protocol ViewerSession: AnyObject {
+    var viewerStatus: ViewerStatus { get }
+    /// The backend's own status text, shown under the configuration form.
+    var statusDescription: String { get }
+    var channelIDs: [ViewerChannelID] { get }
+    func channel(for id: ViewerChannelID) -> (any ViewerChannel)?
+    func disconnect() async
+    func pause() async throws
+    func resume() async throws
+}
+@
